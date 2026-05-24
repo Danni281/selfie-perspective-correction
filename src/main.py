@@ -1,12 +1,14 @@
-"""Phase 1: webcam capture + MediaPipe Face Mesh overlay.
+"""Phase 1+2: webcam capture, MediaPipe Face Mesh overlay, distortion metrics.
 
 Keys:
-  q  quit
-  s  save current frame + landmarks to captures/
+  q / Esc  quit
+  s        save current frame + landmarks to captures/
+  m        toggle metrics HUD on/off
 """
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import time
 from collections import deque
@@ -16,14 +18,17 @@ import cv2
 import mediapipe as mp
 import numpy as np
 
+from metrics import CSV_FIELDS, compute_metrics, csv_row, hud_text
+
 CAPTURE_DIR = Path(__file__).resolve().parents[1] / "captures"
+METRICS_DIR = Path(__file__).resolve().parents[1] / "metrics_logs"
 
 
-def make_face_mesh() -> mp.solutions.face_mesh.FaceMesh:
+def make_face_mesh(refine: bool) -> mp.solutions.face_mesh.FaceMesh:
     return mp.solutions.face_mesh.FaceMesh(
         static_image_mode=False,
         max_num_faces=1,
-        refine_landmarks=False,
+        refine_landmarks=refine,  # iris landmarks (468..477) needed for IPD
         min_detection_confidence=0.5,
         min_tracking_confidence=0.5,
     )
@@ -42,17 +47,25 @@ def draw_landmarks(frame: np.ndarray, pts: np.ndarray) -> None:
         cv2.circle(frame, (x, y), 1, (0, 255, 0), -1)
 
 
-def draw_hud(frame: np.ndarray, fps: float, face_detected: bool) -> None:
-    text = f"FPS: {fps:5.1f}  face: {'yes' if face_detected else 'no '}"
-    cv2.putText(frame, text, (10, 25), cv2.FONT_HERSHEY_SIMPLEX,
-                0.6, (0, 0, 0), 3, cv2.LINE_AA)
-    cv2.putText(frame, text, (10, 25), cv2.FONT_HERSHEY_SIMPLEX,
-                0.6, (0, 255, 0), 1, cv2.LINE_AA)
-    hint = "q quit  |  s save"
-    cv2.putText(frame, hint, (10, frame.shape[0] - 10),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 3, cv2.LINE_AA)
-    cv2.putText(frame, hint, (10, frame.shape[0] - 10),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+def _put(frame: np.ndarray, text: str, org: tuple[int, int],
+         scale: float = 0.6, color: tuple[int, int, int] = (0, 255, 0)) -> None:
+    cv2.putText(frame, text, org, cv2.FONT_HERSHEY_SIMPLEX,
+                scale, (0, 0, 0), 3, cv2.LINE_AA)
+    cv2.putText(frame, text, org, cv2.FONT_HERSHEY_SIMPLEX,
+                scale, color, 1, cv2.LINE_AA)
+
+
+def draw_hud(frame: np.ndarray, fps: float, face_detected: bool,
+             metrics_lines: list[str], show_metrics: bool) -> None:
+    _put(frame, f"FPS: {fps:5.1f}  face: {'yes' if face_detected else 'no '}",
+         (10, 25))
+    if show_metrics:
+        for i, line in enumerate(metrics_lines):
+            _put(frame, line, (10, 55 + i * 25), scale=0.55,
+                 color=(255, 220, 0))
+    hint = "q quit | s save | m metrics"
+    _put(frame, hint, (10, frame.shape[0] - 10), scale=0.5,
+         color=(255, 255, 255))
 
 
 def save_capture(frame_raw: np.ndarray, frame_annotated: np.ndarray,
@@ -83,17 +96,20 @@ def save_capture(frame_raw: np.ndarray, frame_annotated: np.ndarray,
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Phase 1 capture + face mesh")
+    p = argparse.ArgumentParser(description="Phase 1+2 capture + metrics")
     p.add_argument("--camera", type=int, default=0)
     p.add_argument("--width", type=int, default=1280)
     p.add_argument("--height", type=int, default=720)
     p.add_argument("--backend", choices=["avfoundation", "any"],
                    default="avfoundation",
                    help="capture backend (use avfoundation on macOS)")
+    p.add_argument("--no-csv", action="store_true",
+                   help="skip the per-run metrics CSV log")
     return p.parse_args()
 
 
-def open_camera(index: int, width: int, height: int, backend: str) -> cv2.VideoCapture:
+def open_camera(index: int, width: int, height: int,
+                backend: str) -> cv2.VideoCapture:
     api = cv2.CAP_AVFOUNDATION if backend == "avfoundation" else cv2.CAP_ANY
     cap = cv2.VideoCapture(index, api)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
@@ -109,15 +125,37 @@ def open_camera(index: int, width: int, height: int, backend: str) -> cv2.VideoC
     return cap
 
 
+def open_metrics_csv(disabled: bool):
+    if disabled:
+        return None, None, None
+    METRICS_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    path = METRICS_DIR / f"metrics_{stamp}.csv"
+    f = open(path, "w", newline="")
+    writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
+    writer.writeheader()
+    return path, f, writer
+
+
 def main() -> None:
     args = parse_args()
     cap = open_camera(args.camera, args.width, args.height, args.backend)
 
-    face_mesh = make_face_mesh()
+    face_mesh = make_face_mesh(refine=True)
     frame_times: deque[float] = deque(maxlen=30)
+
+    csv_path, csv_fh, csv_writer = open_metrics_csv(args.no_csv)
+    if csv_path is not None:
+        print(f"[metrics] logging to {csv_path}", flush=True)
 
     window = "perspective correction"
     cv2.namedWindow(window, cv2.WINDOW_NORMAL)
+    cv2.setWindowProperty(window, cv2.WND_PROP_TOPMOST, 1)
+
+    flash_until = 0.0
+    show_metrics = True
+    frame_idx = 0
+    t_start = time.perf_counter()
 
     try:
         while True:
@@ -126,7 +164,7 @@ def main() -> None:
             if not ok:
                 print("frame grab failed")
                 break
-            frame_bgr = cv2.flip(frame_bgr, 1)  # mirror for selfie ergonomics
+            frame_bgr = cv2.flip(frame_bgr, 1)
             h, w = frame_bgr.shape[:2]
 
             frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
@@ -136,6 +174,8 @@ def main() -> None:
             if result.multi_face_landmarks:
                 pts = landmarks_to_pixels(result.multi_face_landmarks[0], w, h)
 
+            m = compute_metrics(pts) if pts is not None else None
+
             overlay = frame_bgr.copy()
             if pts is not None:
                 draw_landmarks(overlay, pts)
@@ -143,19 +183,45 @@ def main() -> None:
             dt = time.perf_counter() - t0
             frame_times.append(dt)
             fps = len(frame_times) / sum(frame_times) if frame_times else 0.0
-            draw_hud(overlay, fps, pts is not None)
+            draw_hud(overlay, fps, pts is not None, hud_text(m), show_metrics)
+
+            if time.time() < flash_until:
+                _put(overlay, "SAVED", (w // 2 - 80, h // 2),
+                     scale=2.0, color=(0, 255, 0))
 
             cv2.imshow(window, overlay)
+
+            if csv_writer is not None:
+                csv_writer.writerow(
+                    csv_row(frame_idx, time.perf_counter() - t_start, fps, m)
+                )
+
+            frame_idx += 1
             key = cv2.waitKey(1) & 0xFF
-            if key == ord("q"):
+            if key == 255:
+                continue
+            if key == ord("q") or key == 27:
                 break
             if key == ord("s"):
                 path = save_capture(frame_bgr, overlay, pts)
-                print(f"saved -> {path.parent}/{path.stem.split('_')[0]}_*")
+                print(f"[save] {path.parent}/{path.stem.rsplit('_', 1)[0]}_*  "
+                      f"({'landmarks' if pts is not None else 'no face detected'})",
+                      flush=True)
+                flash_until = time.time() + 0.6
+            elif key == ord("m"):
+                show_metrics = not show_metrics
+                print(f"[hud] metrics {'on' if show_metrics else 'off'}",
+                      flush=True)
+            else:
+                print(f"[key] unknown keycode {key} (focus the video window, "
+                      f"then press s/m/q)", flush=True)
     finally:
         cap.release()
         cv2.destroyAllWindows()
         face_mesh.close()
+        if csv_fh is not None:
+            csv_fh.close()
+            print(f"[metrics] wrote {frame_idx} rows to {csv_path}", flush=True)
 
 
 if __name__ == "__main__":

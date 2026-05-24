@@ -12,7 +12,7 @@ reduces that perspective distortion and stays temporally stable across frames.
 |------:|-------------|-------|
 | 0 | Webcam capture loop + FPS counter | done |
 | 1 | MediaPipe Face Mesh overlay + save key | done |
-| 2 | Per-frame landmark-ratio metrics + CSV log | todo |
+| 2 | Per-frame landmark-ratio metrics + CSV log | done |
 | 3 | Single-frame correction (Delaunay warp) | todo |
 | 4 | Boundary blending mask | todo |
 | 5 | Per-frame baseline video | todo |
@@ -41,17 +41,26 @@ python src/main.py --camera 1   # second camera
 ```
 
 Keys inside the window:
-- `q` — quit
+- `q` / `Esc` — quit
 - `s` — save current frame + landmarks to `captures/`
+- `m` — toggle metrics HUD on/off
 
 Each `s` writes four files under `captures/`:
 `<timestamp>_raw.png`, `<timestamp>_overlay.png`, `<timestamp>_landmarks.npy`,
 `<timestamp>_meta.json`.
 
+Every run also writes a per-frame metrics CSV to
+`metrics_logs/metrics_<timestamp>.csv` with columns:
+`frame_idx, t_seconds, fps, face_detected, face_width, face_height, ipd,
+nose_w, nose_chin, ear_ear, ipd_over_face_w, nose_w_over_face_w,
+nose_chin_over_face_w, ear_ear_over_face_h`. Disable with `--no-csv`.
+
 ## Layout
 
 ```
-src/main.py        # phase-1 capture + face mesh entry point
+src/main.py        # capture loop + face mesh + metrics HUD
+src/metrics.py     # landmark indices + per-frame ratio computation
 captures/          # saved frames + landmarks (gitignored)
+metrics_logs/      # per-run metrics CSVs (gitignored)
 requirements.txt
 ```

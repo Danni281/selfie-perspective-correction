@@ -9,3 +9,5 @@ captures/*.jpg
 captures/*.npy
 captures/*.json
 !captures/.gitkeep
+metrics_logs/*.csv
+!metrics_logs/.gitkeep
