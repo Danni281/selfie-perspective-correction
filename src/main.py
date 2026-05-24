@@ -1,9 +1,11 @@
-"""Phase 1+2: webcam capture, MediaPipe Face Mesh overlay, distortion metrics.
+"""Phase 1+2+3: webcam capture, MediaPipe Face Mesh, distortion metrics,
+single-frame perspective correction (Delaunay piecewise-affine warp).
 
 Keys:
   q / Esc  quit
-  s        save current frame + landmarks to captures/
+  s        save snapshot (raw, overlay, landmarks; corrected too if 'c' is on)
   m        toggle metrics HUD on/off
+  c        toggle correction view (side-by-side raw | corrected)
 """
 from __future__ import annotations
 
@@ -19,6 +21,7 @@ import mediapipe as mp
 import numpy as np
 
 from metrics import CSV_FIELDS, compute_metrics, csv_row, hud_text
+import warp as warp_mod
 
 CAPTURE_DIR = Path(__file__).resolve().parents[1] / "captures"
 METRICS_DIR = Path(__file__).resolve().parents[1] / "metrics_logs"
@@ -76,7 +79,9 @@ def draw_hud(frame: np.ndarray, fps: float, face_detected: bool,
 
 
 def save_capture(frame_raw: np.ndarray, frame_annotated: np.ndarray,
-                 landmarks_px: np.ndarray | None) -> Path:
+                 landmarks_px: np.ndarray | None,
+                 frame_corrected: np.ndarray | None = None,
+                 scale: float | None = None) -> Path:
     CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
     raw_path = CAPTURE_DIR / f"{stamp}_raw.png"
@@ -95,9 +100,19 @@ def save_capture(frame_raw: np.ndarray, frame_annotated: np.ndarray,
         "raw": raw_path.name,
         "overlay": overlay_path.name,
         "landmarks": npy_path.name if landmarks_px is not None else None,
+        "corrected": None,
+        "sidebyside": None,
+        "scale": scale,
     }
     if landmarks_px is not None:
         np.save(npy_path, landmarks_px)
+    if frame_corrected is not None:
+        corrected_path = CAPTURE_DIR / f"{stamp}_corrected.png"
+        side_path = CAPTURE_DIR / f"{stamp}_sidebyside.png"
+        cv2.imwrite(str(corrected_path), frame_corrected)
+        cv2.imwrite(str(side_path), np.hstack([frame_raw, frame_corrected]))
+        meta["corrected"] = corrected_path.name
+        meta["sidebyside"] = side_path.name
     json_path.write_text(json.dumps(meta, indent=2))
     return raw_path
 
@@ -112,6 +127,10 @@ def parse_args() -> argparse.Namespace:
                    help="capture backend (use avfoundation on macOS)")
     p.add_argument("--no-csv", action="store_true",
                    help="skip the per-run metrics CSV log")
+    p.add_argument("--scale", type=float, default=0.92,
+                   help="Phase 3 shrink factor toward face center (1.0 = off)")
+    p.add_argument("--correct-on-start", action="store_true",
+                   help="start with side-by-side correction view enabled")
     return p.parse_args()
 
 
@@ -161,6 +180,7 @@ def main() -> None:
 
     flash_until = 0.0
     show_metrics = True
+    show_correction = args.correct_on_start
     frame_idx = 0
     t_start = time.perf_counter()
 
@@ -187,16 +207,33 @@ def main() -> None:
             if pts is not None:
                 draw_landmarks(overlay, pts)
 
+            corrected = None
+            warp_ms = 0.0
+            if show_correction and pts is not None and pts.shape[0] >= 478:
+                t_w = time.perf_counter()
+                corrected, _ = warp_mod.correct(frame_bgr, pts, scale=args.scale)
+                warp_ms = (time.perf_counter() - t_w) * 1000
+
             dt = time.perf_counter() - t0
             frame_times.append(dt)
             fps = len(frame_times) / sum(frame_times) if frame_times else 0.0
             draw_hud(overlay, fps, pts is not None, hud_text(m), show_metrics)
+            if show_correction:
+                _put(overlay,
+                     f"CORRECT scale={args.scale:.2f}  warp={warp_ms:4.1f}ms",
+                     (10, h - 36), scale=0.55, color=(0, 200, 255))
 
             if time.time() < flash_until:
                 _put(overlay, "SAVED", (w // 2 - 80, h // 2),
                      scale=2.0, color=(0, 255, 0))
 
-            cv2.imshow(window, overlay)
+            if show_correction and corrected is not None:
+                _put(corrected, "CORRECTED", (10, 30), scale=0.7,
+                     color=(0, 200, 255))
+                display = np.hstack([overlay, corrected])
+            else:
+                display = overlay
+            cv2.imshow(window, display)
 
             if csv_writer is not None:
                 csv_writer.writerow(
@@ -210,18 +247,25 @@ def main() -> None:
             if key == ord("q") or key == 27:
                 break
             if key == ord("s"):
-                path = save_capture(frame_bgr, overlay, pts)
+                path = save_capture(frame_bgr, overlay, pts,
+                                    frame_corrected=corrected,
+                                    scale=args.scale if corrected is not None else None)
+                tag = "with corrected" if corrected is not None else (
+                    "landmarks only" if pts is not None else "no face detected")
                 print(f"[save] {path.parent}/{path.stem.rsplit('_', 1)[0]}_*  "
-                      f"({'landmarks' if pts is not None else 'no face detected'})",
-                      flush=True)
+                      f"({tag})", flush=True)
                 flash_until = time.time() + 0.6
             elif key == ord("m"):
                 show_metrics = not show_metrics
                 print(f"[hud] metrics {'on' if show_metrics else 'off'}",
                       flush=True)
+            elif key == ord("c"):
+                show_correction = not show_correction
+                print(f"[hud] correction {'on' if show_correction else 'off'}"
+                      f" (scale={args.scale})", flush=True)
             else:
                 print(f"[key] unknown keycode {key} (focus the video window, "
-                      f"then press s/m/q)", flush=True)
+                      f"then press s/m/c/q)", flush=True)
     finally:
         cap.release()
         cv2.destroyAllWindows()

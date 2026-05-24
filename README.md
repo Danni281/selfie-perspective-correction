@@ -13,7 +13,7 @@ reduces that perspective distortion and stays temporally stable across frames.
 | 0 | Webcam capture loop + FPS counter | done |
 | 1 | MediaPipe Face Mesh overlay + save key | done |
 | 2 | Per-frame landmark-ratio metrics + CSV log | done |
-| 3 | Single-frame correction (Delaunay warp) | todo |
+| 3 | Single-frame correction (Delaunay warp) | done |
 | 4 | Boundary blending mask | todo |
 | 5 | Per-frame baseline video | todo |
 | 6 | Temporal smoothing (EMA + Kalman) | todo |
@@ -44,6 +44,12 @@ Keys inside the window:
 - `q` / `Esc` — quit
 - `s` — save current frame + landmarks to `captures/`
 - `m` — toggle metrics HUD on/off
+- `c` — toggle Phase 3 correction view (raw on left, corrected on right)
+
+CLI flags:
+- `--scale 0.92` — Phase 3 shrink factor toward face center. `1.0` disables
+  the correction; smaller values shrink more. Default `0.92`.
+- `--correct-on-start` — open already in correction view.
 
 Each `s` writes four files under `captures/`:
 `<timestamp>_raw.png`, `<timestamp>_overlay.png`, `<timestamp>_landmarks.npy`,
@@ -58,9 +64,10 @@ nose_chin_over_face_w, ear_ear_over_face_h`. Disable with `--no-csv`.
 ## Layout
 
 ```
-src/main.py        # capture loop + face mesh + metrics HUD
+src/main.py        # capture loop + face mesh + metrics HUD + correction view
 src/metrics.py     # landmark indices + per-frame ratio computation
-captures/          # saved frames + landmarks (gitignored)
+src/warp.py        # Delaunay piecewise-affine warp (Phase 3)
+captures/          # saved frames + landmarks + corrected pairs (gitignored)
 metrics_logs/      # per-run metrics CSVs (gitignored)
 requirements.txt
 ```
