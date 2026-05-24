@@ -81,7 +81,8 @@ def draw_hud(frame: np.ndarray, fps: float, face_detected: bool,
 def save_capture(frame_raw: np.ndarray, frame_annotated: np.ndarray,
                  landmarks_px: np.ndarray | None,
                  frame_corrected: np.ndarray | None = None,
-                 scale: float | None = None) -> Path:
+                 scale: float | None = None,
+                 feather: float | None = None) -> Path:
     CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
     raw_path = CAPTURE_DIR / f"{stamp}_raw.png"
@@ -103,6 +104,7 @@ def save_capture(frame_raw: np.ndarray, frame_annotated: np.ndarray,
         "corrected": None,
         "sidebyside": None,
         "scale": scale,
+        "feather": feather,
     }
     if landmarks_px is not None:
         np.save(npy_path, landmarks_px)
@@ -254,9 +256,12 @@ def main() -> None:
             if key == ord("q") or key == 27:
                 break
             if key == ord("s"):
-                path = save_capture(frame_bgr, overlay, pts,
-                                    frame_corrected=corrected,
-                                    scale=args.scale if corrected is not None else None)
+                path = save_capture(
+                    frame_bgr, overlay, pts,
+                    frame_corrected=corrected,
+                    scale=args.scale if corrected is not None else None,
+                    feather=args.feather if corrected is not None else None,
+                )
                 tag = "with corrected" if corrected is not None else (
                     "landmarks only" if pts is not None else "no face detected")
                 print(f"[save] {path.parent}/{path.stem.rsplit('_', 1)[0]}_*  "
