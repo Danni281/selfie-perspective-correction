@@ -14,7 +14,7 @@ reduces that perspective distortion and stays temporally stable across frames.
 | 1 | MediaPipe Face Mesh overlay + save key | done |
 | 2 | Per-frame landmark-ratio metrics + CSV log | done |
 | 3 | Single-frame correction (Delaunay warp) | done |
-| 4 | Boundary blending mask | todo |
+| 4 | Boundary blending mask | done |
 | 5 | Per-frame baseline video | todo |
 | 6 | Temporal smoothing (EMA + Kalman) | todo |
 | 7 | Real-time optimization (30 FPS live) | todo |
@@ -49,6 +49,10 @@ Keys inside the window:
 CLI flags:
 - `--scale 0.92` — Phase 3 shrink factor toward face center. `1.0` disables
   the correction; smaller values shrink more. Default `0.92`.
+- `--feather 30` — Phase 4 alpha-mask feather radius in pixels. The corrected
+  face is alpha-blended back to the raw image across a band ~this wide
+  straddling the face oval, so the boundary discontinuity disappears. `0`
+  disables blending (raw Phase 3 output). Default `30`.
 - `--correct-on-start` — open already in correction view.
 
 Each `s` writes four files under `captures/`:

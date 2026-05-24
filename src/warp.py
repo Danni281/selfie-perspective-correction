@@ -122,16 +122,65 @@ def build_warp_maps(src_pts: np.ndarray, dst_pts: np.ndarray,
     return map_x, map_y
 
 
+def make_alpha_mask(pts_mediapipe: np.ndarray,
+                    shape: tuple[int, int, int],
+                    feather: float) -> np.ndarray:
+    """Phase 4 boundary blend mask.
+
+    Returns a (H, W) float32 array in [0, 1] where 1.0 means "use the corrected
+    pixel" and 0.0 means "use the raw pixel." The mask is the filled FACE_OVAL
+    polygon, eroded inward by ~feather/2 and then Gaussian-blurred, so the
+    transition straddles the face boundary in a band of width ~`feather`.
+    """
+    h, w = shape[:2]
+    binary = np.zeros((h, w), dtype=np.uint8)
+    oval = pts_mediapipe[list(FACE_OVAL)].astype(np.int32).reshape(-1, 1, 2)
+    cv2.fillPoly(binary, [oval], 255)
+
+    if feather > 0:
+        erode_r = max(1, int(round(feather * 0.5)))
+        kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE, (2 * erode_r + 1, 2 * erode_r + 1)
+        )
+        binary = cv2.erode(binary, kernel)
+        sigma = max(1.0, feather * 0.5)
+        ksize = max(3, int(round(sigma * 6)) | 1)  # odd
+        blurred = cv2.GaussianBlur(binary, (ksize, ksize), sigma)
+    else:
+        blurred = binary
+
+    return blurred.astype(np.float32) * (1.0 / 255.0)
+
+
+def blend(raw: np.ndarray, corrected: np.ndarray,
+          alpha: np.ndarray) -> np.ndarray:
+    """alpha * corrected + (1 - alpha) * raw, per channel."""
+    a = alpha[..., None]
+    out = a * corrected.astype(np.float32) + (1.0 - a) * raw.astype(np.float32)
+    return np.clip(out, 0, 255).astype(raw.dtype)
+
+
 def correct(image: np.ndarray, pts_mediapipe: np.ndarray,
-            scale: float = 0.92) -> tuple[np.ndarray, dict]:
-    """End-to-end Phase 3 correction. Returns (corrected_image, debug_info)."""
+            scale: float = 0.92,
+            feather: float = 30.0) -> tuple[np.ndarray, dict]:
+    """End-to-end Phase 3+4 correction. Returns (corrected_image, debug_info).
+
+    feather > 0 enables Phase 4 boundary blending. feather=0 returns the raw
+    piecewise-affine output (the discontinuous Phase 3 baseline).
+    """
     src_pts, dst_pts = build_point_sets(pts_mediapipe, image.shape, scale)
     triangles = triangulate(dst_pts)
     map_x, map_y = build_warp_maps(src_pts, dst_pts, triangles, image.shape)
-    corrected = cv2.remap(image, map_x, map_y, cv2.INTER_LINEAR,
-                          borderMode=cv2.BORDER_REFLECT)
-    return corrected, {
+    warped = cv2.remap(image, map_x, map_y, cv2.INTER_LINEAR,
+                       borderMode=cv2.BORDER_REFLECT)
+    if feather > 0:
+        alpha = make_alpha_mask(pts_mediapipe, image.shape, feather)
+        corrected_img = blend(image, warped, alpha)
+    else:
+        corrected_img = warped
+    return corrected_img, {
         "n_triangles": int(triangles.shape[0]),
         "n_src_pts": int(src_pts.shape[0]),
         "scale": scale,
+        "feather": feather,
     }

@@ -129,6 +129,9 @@ def parse_args() -> argparse.Namespace:
                    help="skip the per-run metrics CSV log")
     p.add_argument("--scale", type=float, default=0.92,
                    help="Phase 3 shrink factor toward face center (1.0 = off)")
+    p.add_argument("--feather", type=float, default=30.0,
+                   help="Phase 4 alpha-mask feather radius in pixels "
+                        "(0 = no blending, raw Phase 3 output)")
     p.add_argument("--correct-on-start", action="store_true",
                    help="start with side-by-side correction view enabled")
     return p.parse_args()
@@ -211,7 +214,10 @@ def main() -> None:
             warp_ms = 0.0
             if show_correction and pts is not None and pts.shape[0] >= 478:
                 t_w = time.perf_counter()
-                corrected, _ = warp_mod.correct(frame_bgr, pts, scale=args.scale)
+                corrected, _ = warp_mod.correct(
+                    frame_bgr, pts,
+                    scale=args.scale, feather=args.feather,
+                )
                 warp_ms = (time.perf_counter() - t_w) * 1000
 
             dt = time.perf_counter() - t0
@@ -220,7 +226,8 @@ def main() -> None:
             draw_hud(overlay, fps, pts is not None, hud_text(m), show_metrics)
             if show_correction:
                 _put(overlay,
-                     f"CORRECT scale={args.scale:.2f}  warp={warp_ms:4.1f}ms",
+                     f"CORRECT scale={args.scale:.2f} feather={args.feather:.0f}"
+                     f"  warp={warp_ms:4.1f}ms",
                      (10, h - 36), scale=0.55, color=(0, 200, 255))
 
             if time.time() < flash_until:
