@@ -1,4 +1,8 @@
-opencv-python>=4.10
-mediapipe>=0.10.21
-numpy>=1.26
+# MediaPipe 0.10.30+ dropped the legacy `mp.solutions` API that Face Mesh lives
+# in; pin to 0.10.21 until we migrate to the Tasks API.
+mediapipe==0.10.21
+# mediapipe 0.10.21 needs numpy<2; opencv-python>=4.11 requires numpy>=2.
+# Pin opencv-python to a numpy<2-compatible release.
+opencv-python==4.10.0.84
+numpy<2
 scipy>=1.13

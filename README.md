@@ -23,10 +23,12 @@ reduces that perspective distortion and stays temporally stable across frames.
 
 ## Setup
 
-Requires Python 3.10+ (tested on 3.14).
+Requires **Python 3.12** (mediapipe 0.10.21 has no wheels for 3.13/3.14,
+and newer mediapipe drops the Face Mesh `solutions` API).
 
 ```bash
-python3 -m venv .venv
+brew install python@3.12         # if you don't have it
+python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
