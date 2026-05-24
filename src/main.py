@@ -245,7 +245,7 @@ def main() -> None:
             dt = time.perf_counter() - t0
             frame_times.append(dt)
             fps = len(frame_times) / sum(frame_times) if frame_times else 0.0
-            draw_hud(overlay, fps, pts is not None, hud_text(m), show_metrics)
+            draw_hud(overlay, fps, pts_xy is not None, hud_text(m), show_metrics)
             if show_correction:
                 if args.uniform_scale is not None:
                     mode_str = f"UNIFORM scale={args.uniform_scale:.2f}"
