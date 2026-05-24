@@ -87,17 +87,31 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--camera", type=int, default=0)
     p.add_argument("--width", type=int, default=1280)
     p.add_argument("--height", type=int, default=720)
+    p.add_argument("--backend", choices=["avfoundation", "any"],
+                   default="avfoundation",
+                   help="capture backend (use avfoundation on macOS)")
     return p.parse_args()
+
+
+def open_camera(index: int, width: int, height: int, backend: str) -> cv2.VideoCapture:
+    api = cv2.CAP_AVFOUNDATION if backend == "avfoundation" else cv2.CAP_ANY
+    cap = cv2.VideoCapture(index, api)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    if not cap.isOpened():
+        raise SystemExit(
+            f"could not open camera index {index} (backend={backend}).\n"
+            "  - on macOS, grant Camera permission to your terminal: "
+            "System Settings -> Privacy & Security -> Camera -> enable Terminal/iTerm/VS Code\n"
+            "  - then fully quit and reopen the terminal\n"
+            "  - try --camera 1 if you have multiple cameras"
+        )
+    return cap
 
 
 def main() -> None:
     args = parse_args()
-
-    cap = cv2.VideoCapture(args.camera)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, args.width)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)
-    if not cap.isOpened():
-        raise SystemExit(f"could not open camera index {args.camera}")
+    cap = open_camera(args.camera, args.width, args.height, args.backend)
 
     face_mesh = make_face_mesh()
     frame_times: deque[float] = deque(maxlen=30)
