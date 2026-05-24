@@ -58,13 +58,20 @@ def _put(frame: np.ndarray, text: str, org: tuple[int, int],
 def draw_hud(frame: np.ndarray, fps: float, face_detected: bool,
              metrics_lines: list[str], show_metrics: bool) -> None:
     _put(frame, f"FPS: {fps:5.1f}  face: {'yes' if face_detected else 'no '}",
-         (10, 25))
+         (10, 30), scale=0.7)
     if show_metrics:
+        # translucent backing strip so yellow text is readable on any background
+        y_top = 50
+        line_h = 32
+        h = line_h * len(metrics_lines) + 12
+        strip = frame[y_top:y_top + h, 0:560]
+        if strip.size:
+            strip[:] = (strip * 0.35).astype(strip.dtype)
         for i, line in enumerate(metrics_lines):
-            _put(frame, line, (10, 55 + i * 25), scale=0.55,
-                 color=(255, 220, 0))
+            _put(frame, line, (10, y_top + 26 + i * line_h), scale=0.7,
+                 color=(0, 255, 255))  # BGR yellow
     hint = "q quit | s save | m metrics"
-    _put(frame, hint, (10, frame.shape[0] - 10), scale=0.5,
+    _put(frame, hint, (10, frame.shape[0] - 12), scale=0.55,
          color=(255, 255, 255))
 
 
