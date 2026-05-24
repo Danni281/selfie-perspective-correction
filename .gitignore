@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+.idea/
+.vscode/
+captures/*.png
+captures/*.jpg
+captures/*.npy
+captures/*.json
+!captures/.gitkeep
