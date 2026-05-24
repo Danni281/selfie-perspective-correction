@@ -47,12 +47,17 @@ Keys inside the window:
 - `c` — toggle Phase 3 correction view (raw on left, corrected on right)
 
 CLI flags:
-- `--scale 0.92` — Phase 3 shrink factor toward face center. `1.0` disables
-  the correction; smaller values shrink more. Default `0.92`.
-- `--feather 30` — Phase 4 alpha-mask feather radius in pixels. The corrected
-  face is alpha-blended back to the raw image across a band ~this wide
-  straddling the face oval, so the boundary discontinuity disappears. `0`
-  disables blending (raw Phase 3 output). Default `30`.
+- `--strength 0.15` — z-weighted shrink strength. Per-landmark scale =
+  `1 - strength * normalized_depth`, so the closest-to-camera landmark
+  (nose tip) is pulled toward face center by this fraction and the
+  farthest landmark is untouched. Default `0.15`. Set `0` to disable.
+- `--uniform-scale 0.85` — ABLATION: use the naive uniform shrink (Phase 3
+  baseline). Overrides `--strength`. Visibly puffs the cheeks because
+  every central landmark shrinks equally; kept for the report comparison.
+- `--feather 30` — Phase 4 alpha-mask feather radius in pixels. The
+  corrected face is alpha-blended back to the raw image across a band
+  ~this wide straddling the face oval, so the boundary discontinuity
+  disappears. `0` disables blending. Default `30`.
 - `--correct-on-start` — open already in correction view.
 
 Each `s` writes four files under `captures/`:

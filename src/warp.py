@@ -43,28 +43,70 @@ def _image_anchors(width: int, height: int) -> np.ndarray:
     )
 
 
-def shrink_target(pts: np.ndarray, scale: float,
-                  fixed_indices: tuple[int, ...] = FACE_OVAL) -> np.ndarray:
-    """Return target landmarks: shrink non-fixed landmarks toward the centroid
-    of the fixed (face-oval) ring by `scale` (1.0 = identity, <1 shrinks)."""
-    target = pts.copy().astype(np.float32)
+def depth_weighted_target(pts_xyz: np.ndarray, strength: float,
+                          fixed_indices: tuple[int, ...] = FACE_OVAL) -> np.ndarray:
+    """Z-weighted shrink: each landmark moves toward the face center by an
+    amount proportional to how close it is to the camera, per MediaPipe z.
+
+    The closest landmark (smallest z) is shrunk by `strength` (e.g. 0.15 = 15%
+    pull toward center). The farthest landmark is not moved at all. FACE_OVAL
+    is always fixed so the head outline is preserved.
+
+    pts_xyz: (N, 3) array where columns are (x_px, y_px, z_mediapipe).
+    """
+    xy = pts_xyz[:, :2].astype(np.float32)
+    z = pts_xyz[:, 2].astype(np.float32)
+
     fixed = np.asarray(fixed_indices, dtype=np.int64)
-    center = pts[fixed].mean(axis=0)
-    movable = np.ones(len(pts), dtype=bool)
+    center = xy[fixed].mean(axis=0)
+
+    z_min, z_max = float(z.min()), float(z.max())
+    if z_max - z_min < 1e-6:
+        # degenerate (e.g. synthetic test data); fall back to uniform
+        normalized = np.zeros_like(z)
+    else:
+        # 1.0 at the closest landmark, 0.0 at the farthest
+        normalized = (z_max - z) / (z_max - z_min)
+
+    per_lm_scale = 1.0 - strength * normalized
+    per_lm_scale[fixed] = 1.0  # head outline is locked
+
+    target = center + per_lm_scale[:, None] * (xy - center)
+    return target.astype(np.float32)
+
+
+def uniform_target(pts_xyz: np.ndarray, scale: float,
+                   fixed_indices: tuple[int, ...] = FACE_OVAL) -> np.ndarray:
+    """Phase 3 baseline: shrink every non-FACE_OVAL landmark toward face
+    center by a constant factor. Kept for ablation / report comparison."""
+    xy = pts_xyz[:, :2].astype(np.float32)
+    target = xy.copy()
+    fixed = np.asarray(fixed_indices, dtype=np.int64)
+    center = xy[fixed].mean(axis=0)
+    movable = np.ones(len(xy), dtype=bool)
     movable[fixed] = False
-    target[movable] = center + scale * (pts[movable] - center)
+    target[movable] = center + scale * (xy[movable] - center)
     return target
 
 
-def build_point_sets(pts_mediapipe: np.ndarray, shape: tuple[int, int, int],
-                     scale: float) -> tuple[np.ndarray, np.ndarray]:
-    """src_pts (source landmarks) and dst_pts (target landmarks), each with
-    image anchors appended so the triangulation covers the whole frame."""
+def build_point_sets(pts_xyz: np.ndarray, shape: tuple[int, int, int],
+                     strength: float,
+                     uniform_scale: float | None = None
+                     ) -> tuple[np.ndarray, np.ndarray]:
+    """src_pts / dst_pts in pixel coords with image anchors appended.
+
+    If `uniform_scale` is set, use the legacy Phase 3 uniform-shrink target
+    (for ablation). Otherwise use z-weighted target with `strength`.
+    """
     h, w = shape[:2]
     anchors = _image_anchors(w, h)
-    target = shrink_target(pts_mediapipe, scale)
-    src_pts = np.vstack([pts_mediapipe.astype(np.float32), anchors])
-    dst_pts = np.vstack([target.astype(np.float32), anchors])
+    if uniform_scale is not None:
+        target_xy = uniform_target(pts_xyz, uniform_scale)
+    else:
+        target_xy = depth_weighted_target(pts_xyz, strength)
+    src_xy = pts_xyz[:, :2].astype(np.float32)
+    src_pts = np.vstack([src_xy, anchors])
+    dst_pts = np.vstack([target_xy, anchors])
     return src_pts, dst_pts
 
 
@@ -160,27 +202,34 @@ def blend(raw: np.ndarray, corrected: np.ndarray,
     return np.clip(out, 0, 255).astype(raw.dtype)
 
 
-def correct(image: np.ndarray, pts_mediapipe: np.ndarray,
-            scale: float = 0.92,
-            feather: float = 30.0) -> tuple[np.ndarray, dict]:
+def correct(image: np.ndarray, pts_xyz: np.ndarray,
+            strength: float = 0.15,
+            feather: float = 30.0,
+            uniform_scale: float | None = None) -> tuple[np.ndarray, dict]:
     """End-to-end Phase 3+4 correction. Returns (corrected_image, debug_info).
 
-    feather > 0 enables Phase 4 boundary blending. feather=0 returns the raw
-    piecewise-affine output (the discontinuous Phase 3 baseline).
+    Default mode is z-weighted: per-landmark shrink proportional to depth
+    (closer to camera = more shrink). Set `uniform_scale` to use the legacy
+    uniform shrink (Phase 3 baseline) for ablation.
+    feather > 0 enables Phase 4 boundary blending.
     """
-    src_pts, dst_pts = build_point_sets(pts_mediapipe, image.shape, scale)
+    src_pts, dst_pts = build_point_sets(
+        pts_xyz, image.shape, strength, uniform_scale=uniform_scale,
+    )
     triangles = triangulate(dst_pts)
     map_x, map_y = build_warp_maps(src_pts, dst_pts, triangles, image.shape)
     warped = cv2.remap(image, map_x, map_y, cv2.INTER_LINEAR,
                        borderMode=cv2.BORDER_REFLECT)
     if feather > 0:
-        alpha = make_alpha_mask(pts_mediapipe, image.shape, feather)
+        alpha = make_alpha_mask(pts_xyz[:, :2], image.shape, feather)
         corrected_img = blend(image, warped, alpha)
     else:
         corrected_img = warped
     return corrected_img, {
         "n_triangles": int(triangles.shape[0]),
         "n_src_pts": int(src_pts.shape[0]),
-        "scale": scale,
+        "mode": "uniform" if uniform_scale is not None else "depth",
+        "strength": strength,
+        "uniform_scale": uniform_scale,
         "feather": feather,
     }

@@ -37,11 +37,18 @@ def make_face_mesh(refine: bool) -> mp.solutions.face_mesh.FaceMesh:
     )
 
 
-def landmarks_to_pixels(landmarks, width: int, height: int) -> np.ndarray:
-    pts = np.empty((len(landmarks.landmark), 2), dtype=np.float32)
+def landmarks_to_xyz(landmarks, width: int, height: int) -> np.ndarray:
+    """Return (N, 3) array: (x_px, y_px, z_mediapipe_normalized).
+
+    MediaPipe's `z` is the depth at the landmark with the head's center as
+    origin, in roughly image-width-normalized units; smaller z = closer to
+    the camera.
+    """
+    pts = np.empty((len(landmarks.landmark), 3), dtype=np.float32)
     for i, lm in enumerate(landmarks.landmark):
         pts[i, 0] = lm.x * width
         pts[i, 1] = lm.y * height
+        pts[i, 2] = lm.z * width  # match xy scale
     return pts
 
 
@@ -81,7 +88,9 @@ def draw_hud(frame: np.ndarray, fps: float, face_detected: bool,
 def save_capture(frame_raw: np.ndarray, frame_annotated: np.ndarray,
                  landmarks_px: np.ndarray | None,
                  frame_corrected: np.ndarray | None = None,
-                 scale: float | None = None,
+                 mode: str | None = None,
+                 strength: float | None = None,
+                 uniform_scale: float | None = None,
                  feather: float | None = None) -> Path:
     CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -103,7 +112,9 @@ def save_capture(frame_raw: np.ndarray, frame_annotated: np.ndarray,
         "landmarks": npy_path.name if landmarks_px is not None else None,
         "corrected": None,
         "sidebyside": None,
-        "scale": scale,
+        "mode": mode,
+        "strength": strength,
+        "uniform_scale": uniform_scale,
         "feather": feather,
     }
     if landmarks_px is not None:
@@ -129,8 +140,13 @@ def parse_args() -> argparse.Namespace:
                    help="capture backend (use avfoundation on macOS)")
     p.add_argument("--no-csv", action="store_true",
                    help="skip the per-run metrics CSV log")
-    p.add_argument("--scale", type=float, default=0.92,
-                   help="Phase 3 shrink factor toward face center (1.0 = off)")
+    p.add_argument("--strength", type=float, default=0.15,
+                   help="z-weighted shrink strength: fraction by which the "
+                        "closest-to-camera landmark is pulled toward face "
+                        "center; farthest landmark is untouched. 0 disables.")
+    p.add_argument("--uniform-scale", type=float, default=None,
+                   help="ABLATION: use Phase 3 uniform shrink (e.g. 0.85) "
+                        "instead of z-weighted. Overrides --strength.")
     p.add_argument("--feather", type=float, default=30.0,
                    help="Phase 4 alpha-mask feather radius in pixels "
                         "(0 = no blending, raw Phase 3 output)")
@@ -202,23 +218,27 @@ def main() -> None:
             frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
             result = face_mesh.process(frame_rgb)
 
-            pts = None
+            pts_xyz = None
+            pts_xy = None
             if result.multi_face_landmarks:
-                pts = landmarks_to_pixels(result.multi_face_landmarks[0], w, h)
+                pts_xyz = landmarks_to_xyz(result.multi_face_landmarks[0], w, h)
+                pts_xy = pts_xyz[:, :2]
 
-            m = compute_metrics(pts) if pts is not None else None
+            m = compute_metrics(pts_xy) if pts_xy is not None else None
 
             overlay = frame_bgr.copy()
-            if pts is not None:
-                draw_landmarks(overlay, pts)
+            if pts_xy is not None:
+                draw_landmarks(overlay, pts_xy)
 
             corrected = None
             warp_ms = 0.0
-            if show_correction and pts is not None and pts.shape[0] >= 478:
+            if show_correction and pts_xyz is not None and pts_xyz.shape[0] >= 478:
                 t_w = time.perf_counter()
                 corrected, _ = warp_mod.correct(
-                    frame_bgr, pts,
-                    scale=args.scale, feather=args.feather,
+                    frame_bgr, pts_xyz,
+                    strength=args.strength,
+                    uniform_scale=args.uniform_scale,
+                    feather=args.feather,
                 )
                 warp_ms = (time.perf_counter() - t_w) * 1000
 
@@ -227,8 +247,12 @@ def main() -> None:
             fps = len(frame_times) / sum(frame_times) if frame_times else 0.0
             draw_hud(overlay, fps, pts is not None, hud_text(m), show_metrics)
             if show_correction:
+                if args.uniform_scale is not None:
+                    mode_str = f"UNIFORM scale={args.uniform_scale:.2f}"
+                else:
+                    mode_str = f"DEPTH strength={args.strength:.2f}"
                 _put(overlay,
-                     f"CORRECT scale={args.scale:.2f} feather={args.feather:.0f}"
+                     f"{mode_str}  feather={args.feather:.0f}"
                      f"  warp={warp_ms:4.1f}ms",
                      (10, h - 36), scale=0.55, color=(0, 200, 255))
 
@@ -257,13 +281,16 @@ def main() -> None:
                 break
             if key == ord("s"):
                 path = save_capture(
-                    frame_bgr, overlay, pts,
+                    frame_bgr, overlay, pts_xyz,
                     frame_corrected=corrected,
-                    scale=args.scale if corrected is not None else None,
+                    mode=("uniform" if args.uniform_scale is not None
+                          else "depth") if corrected is not None else None,
+                    strength=args.strength if corrected is not None else None,
+                    uniform_scale=args.uniform_scale if corrected is not None else None,
                     feather=args.feather if corrected is not None else None,
                 )
                 tag = "with corrected" if corrected is not None else (
-                    "landmarks only" if pts is not None else "no face detected")
+                    "landmarks only" if pts_xyz is not None else "no face detected")
                 print(f"[save] {path.parent}/{path.stem.rsplit('_', 1)[0]}_*  "
                       f"({tag})", flush=True)
                 flash_until = time.time() + 0.6
