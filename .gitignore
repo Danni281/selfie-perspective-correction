@@ -11,3 +11,5 @@ captures/*.json
 !captures/.gitkeep
 metrics_logs/*.csv
 !metrics_logs/.gitkeep
+# report PDFs and HTML are kept in git
+
