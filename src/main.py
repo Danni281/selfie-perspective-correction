@@ -140,13 +140,19 @@ def parse_args() -> argparse.Namespace:
                    help="capture backend (use avfoundation on macOS)")
     p.add_argument("--no-csv", action="store_true",
                    help="skip the per-run metrics CSV log")
-    p.add_argument("--strength", type=float, default=0.5,
-                   help="perspective correction strength (mimics a longer "
-                        "focal length). 0 = no change, 1 = full orthographic. "
-                        "0.3-0.6 looks natural for a typical webcam selfie.")
+    p.add_argument("--mode", choices=["nose", "perspective", "uniform"],
+                   default="nose",
+                   help="warp mode. 'nose' (default): localized correction "
+                        "of the nose region only -- clean and artifact-free. "
+                        "'perspective': full-face depth re-projection "
+                        "(stronger effect, peripheral artifacts). "
+                        "'uniform': legacy Phase 3 baseline.")
+    p.add_argument("--strength", type=float, default=0.3,
+                   help="correction strength for nose/perspective modes. "
+                        "0 = none, 1 = aggressive. Default 0.3.")
     p.add_argument("--uniform-scale", type=float, default=None,
-                   help="ABLATION: use Phase 3 uniform shrink (e.g. 0.85) "
-                        "instead of z-weighted. Overrides --strength.")
+                   help="ABLATION: only used with --mode uniform; shrink "
+                        "factor for the legacy uniform Phase 3 baseline.")
     p.add_argument("--feather", type=float, default=30.0,
                    help="Phase 4 alpha-mask feather radius in pixels "
                         "(0 = no blending, raw Phase 3 output)")
@@ -237,6 +243,7 @@ def main() -> None:
                 corrected, _ = warp_mod.correct(
                     frame_bgr, pts_xyz,
                     strength=args.strength,
+                    mode=args.mode,
                     uniform_scale=args.uniform_scale,
                     feather=args.feather,
                 )
@@ -247,10 +254,13 @@ def main() -> None:
             fps = len(frame_times) / sum(frame_times) if frame_times else 0.0
             draw_hud(overlay, fps, pts_xy is not None, hud_text(m), show_metrics)
             if show_correction:
-                if args.uniform_scale is not None:
-                    mode_str = f"UNIFORM scale={args.uniform_scale:.2f}"
-                else:
+                if args.mode == "uniform":
+                    sc = args.uniform_scale if args.uniform_scale is not None else 0.92
+                    mode_str = f"UNIFORM scale={sc:.2f}"
+                elif args.mode == "perspective":
                     mode_str = f"PERSP strength={args.strength:.2f}"
+                else:
+                    mode_str = f"NOSE strength={args.strength:.2f}"
                 _put(overlay,
                      f"{mode_str}  feather={args.feather:.0f}"
                      f"  warp={warp_ms:4.1f}ms",
@@ -283,8 +293,7 @@ def main() -> None:
                 path = save_capture(
                     frame_bgr, overlay, pts_xyz,
                     frame_corrected=corrected,
-                    mode=("uniform" if args.uniform_scale is not None
-                          else "perspective") if corrected is not None else None,
+                    mode=args.mode if corrected is not None else None,
                     strength=args.strength if corrected is not None else None,
                     uniform_scale=args.uniform_scale if corrected is not None else None,
                     feather=args.feather if corrected is not None else None,

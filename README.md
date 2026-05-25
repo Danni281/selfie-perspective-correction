@@ -47,13 +47,21 @@ Keys inside the window:
 - `c` — toggle Phase 3 correction view (raw on left, corrected on right)
 
 CLI flags:
-- `--strength 0.15` — z-weighted shrink strength. Per-landmark scale =
-  `1 - strength * normalized_depth`, so the closest-to-camera landmark
-  (nose tip) is pulled toward face center by this fraction and the
-  farthest landmark is untouched. Default `0.15`. Set `0` to disable.
-- `--uniform-scale 0.85` — ABLATION: use the naive uniform shrink (Phase 3
-  baseline). Overrides `--strength`. Visibly puffs the cheeks because
-  every central landmark shrinks equally; kept for the report comparison.
+- `--mode {nose, perspective, uniform}` — correction mode. Default `nose`.
+  - `nose`: localized correction of ~20 nose-region landmarks only.
+    Clean, artifact-free, the recommended setting. The effect is
+    deliberately subtle: subtle nose retreat, everything else untouched.
+  - `perspective`: depth-aware shrink applied to all interior landmarks.
+    Stronger effect but produces peripheral artifacts because sparse 2D
+    landmarks can't represent the full perspective transform without a
+    3D model (see Fried 2016).
+  - `uniform`: legacy Phase 3 baseline (uniform shrink toward face
+    center). Visibly puffs the cheeks; kept only for ablation comparison
+    in the report.
+- `--strength 0.3` — correction strength for `nose` and `perspective`
+  modes. `0` = no correction; `1` = aggressive. Default `0.3`.
+- `--uniform-scale 0.85` — Phase 3 ablation: shrink factor when
+  `--mode uniform`.
 - `--feather 30` — Phase 4 alpha-mask feather radius in pixels. The
   corrected face is alpha-blended back to the raw image across a band
   ~this wide straddling the face oval, so the boundary discontinuity

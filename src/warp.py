@@ -30,6 +30,19 @@ FACE_OVAL: tuple[int, ...] = (
     172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109,
 )
 
+# Tight cluster of landmarks covering only the nose (tip, bridge, nostrils).
+# The nose-only mode displaces just these and pins everything else, so the
+# warp is localized to the region with the largest perspective distortion.
+NOSE_REGION: tuple[int, ...] = (
+    1, 2, 4, 5, 6, 19, 20, 94, 168, 195, 197,    # nose centerline + tip
+    48, 49, 64, 219, 220,                         # right nostril/alar
+    278, 279, 294, 439, 440,                      # left nostril/alar
+)
+
+# Landmarks defining the "face midpoint" (iris centers + mouth corners).
+# Nose landmarks shrink toward this centroid in nose-only mode.
+FACE_MIDPOINT_REFS: tuple[int, ...] = (468, 473, 78, 308)
+
 
 def _image_anchors(width: int, height: int) -> np.ndarray:
     w1, h1 = width - 1, height - 1
@@ -43,39 +56,85 @@ def _image_anchors(width: int, height: int) -> np.ndarray:
     )
 
 
-def perspective_target(pts_xyz: np.ndarray, strength: float,
-                       face_plane_indices: tuple[int, ...] = FACE_OVAL
-                       ) -> np.ndarray:
-    """Mimic a longer focal length / greater camera distance.
+def nose_only_target(pts_xyz: np.ndarray, strength: float,
+                     nose_indices: tuple[int, ...] = NOSE_REGION,
+                     center_indices: tuple[int, ...] = FACE_MIDPOINT_REFS
+                     ) -> np.ndarray:
+    """Localized nose-region correction. Everything outside NOSE_REGION is
+    pinned at its original position; nose landmarks are shrunk toward the
+    face midpoint by an amount proportional to their depth offset from the
+    median z.
 
-    For each landmark we compute its depth offset relative to the FACE_OVAL
-    plane and apply the symmetric perspective re-projection:
+    Why this is the default mode: broader 2D warps using sparse MediaPipe
+    landmarks ALWAYS produce peripheral artifacts (over-displaced brow
+    landmarks, ghosting along the head outline). Fried 2016 sidesteps this
+    by fitting a 3D morphable model so the warp can be dense and smooth;
+    we don't have that, so we restrict the warp to the region with the
+    largest visible perspective distortion (the nose) and leave the rest
+    of the face untouched. The result is a small but artifact-free
+    correction.
 
-        new_radial = (1 + strength * t) * old_radial
+    strength ~ 0.2-0.4 is a good range; 0.3 default.
+    """
+    xy = pts_xyz[:, :2].astype(np.float32)
+    z = pts_xyz[:, 2].astype(np.float32)
+    target = xy.copy()
 
-    where t = (z - z_face_plane) / z_range is in roughly [-1, 1]. Features in
-    front of the face plane (t < 0, e.g. nose tip) move INWARD; features
-    behind it (t > 0, e.g. back of jaw, ears) move OUTWARD; landmarks at the
-    face plane (t ~ 0, e.g. cheekbones) barely move. This is the standard
-    "telephoto compression" effect a longer lens produces, applied per
-    landmark.
+    nose = np.asarray(nose_indices, dtype=np.int64)
+    center = xy[list(center_indices)].mean(axis=0)
 
-    strength ~ 0.3-0.6 looks natural; strength=1.0 approximates an
-    orthographic projection (face fully "flattened").
+    z_median = float(np.median(z))
+    z_front_range = max(z_median - float(z.min()), 1e-6)
+    # negative for landmarks in front of the face plane, clamped at 0 so we
+    # never expand
+    t_nose = np.minimum(0.0, (z[nose] - z_median) / z_front_range)
+    scale = 1.0 + strength * t_nose  # <= 1, smaller for landmarks in front
+
+    target[nose] = center + scale[:, None] * (xy[nose] - center)
+    return target.astype(np.float32)
+
+
+def perspective_target(pts_xyz: np.ndarray, strength: float) -> np.ndarray:
+    """Mimic a longer focal length using a depth-aware shrink-only warp.
+
+    Important: do NOT use FACE_OVAL as the "face plane" reference. FACE_OVAL
+    is a 3D ring around the head -- the forehead landmark sits far forward
+    (close to the camera) while the cheek-edge landmarks sit far back. Using
+    FACE_OVAL.mean(z) overestimates the face-plane depth and overshrinks
+    everything in front of it. Use the global median z instead -- most face
+    landmarks (eyes, mouth, cheekbones, lips) cluster around the median,
+    which is the actual visual face plane.
+
+    Per-landmark radial scale (toward the face centroid):
+
+        t = (z - z_median) / (z_median - z.min())
+        radial_scale = min(1.0, 1.0 + strength * t)
+
+    - Nose tip (z = z.min): t = -1 -> scale = 1 - strength (max shrink)
+    - Face-plane landmark (z = z_median): t = 0 -> scale = 1 (no change)
+    - Anything farther than the median: t > 0, scale clamped at 1
     """
     xy = pts_xyz[:, :2].astype(np.float32)
     z = pts_xyz[:, 2].astype(np.float32)
 
-    plane = np.asarray(face_plane_indices, dtype=np.int64)
-    center = xy[plane].mean(axis=0)
-    z_face_plane = float(z[plane].mean())
+    # face center for the radial transform: centroid of the landmarks at or
+    # in front of the face plane (excludes the wrap-around-the-head FACE_OVAL
+    # backside which would bias the center sideways)
+    z_median = float(np.median(z))
+    front_mask = z <= z_median
+    center = xy[front_mask].mean(axis=0)
 
-    z_offset = z - z_face_plane
-    z_range = max(abs(z.max() - z_face_plane),
-                  abs(z_face_plane - z.min()), 1e-6)
-    t = z_offset / z_range  # roughly in [-1, 1]
+    z_front_range = max(z_median - float(z.min()), 1e-6)
+    t = (z - z_median) / z_front_range  # nose tip ~ -1, median = 0
 
-    radial = 1.0 + strength * t
+    radial = np.minimum(1.0, 1.0 + strength * t).astype(np.float32)
+
+    # Hard-pin the head outline. MediaPipe places landmark 10 (top of
+    # forehead) and 152 (chin) far forward in z, so they would get a big
+    # depth-based shrink and visibly distort the head shape. The head
+    # silhouette has to stay put regardless of what z says.
+    radial[list(FACE_OVAL)] = 1.0
+
     target = center + radial[:, None] * (xy - center)
     return target.astype(np.float32)
 
@@ -95,20 +154,27 @@ def uniform_target(pts_xyz: np.ndarray, scale: float,
 
 
 def build_point_sets(pts_xyz: np.ndarray, shape: tuple[int, int, int],
-                     strength: float,
+                     strength: float, mode: str = "nose",
                      uniform_scale: float | None = None
                      ) -> tuple[np.ndarray, np.ndarray]:
     """src_pts / dst_pts in pixel coords with image anchors appended.
 
-    If `uniform_scale` is set, use the legacy Phase 3 uniform-shrink target
-    (for ablation). Otherwise use z-weighted target with `strength`.
+    mode: "nose" (default, restricted to NOSE_REGION),
+          "perspective" (full-face depth re-projection, has peripheral artifacts),
+          "uniform" (legacy Phase 3, requires uniform_scale).
     """
     h, w = shape[:2]
     anchors = _image_anchors(w, h)
-    if uniform_scale is not None:
-        target_xy = uniform_target(pts_xyz, uniform_scale)
-    else:
+    if mode == "uniform":
+        target_xy = uniform_target(pts_xyz,
+                                   uniform_scale if uniform_scale is not None
+                                   else 0.92)
+    elif mode == "perspective":
         target_xy = perspective_target(pts_xyz, strength)
+    elif mode == "nose":
+        target_xy = nose_only_target(pts_xyz, strength)
+    else:
+        raise ValueError(f"unknown warp mode: {mode!r}")
     src_xy = pts_xyz[:, :2].astype(np.float32)
     src_pts = np.vstack([src_xy, anchors])
     dst_pts = np.vstack([target_xy, anchors])
@@ -208,18 +274,22 @@ def blend(raw: np.ndarray, corrected: np.ndarray,
 
 
 def correct(image: np.ndarray, pts_xyz: np.ndarray,
-            strength: float = 0.15,
+            strength: float = 0.3,
+            mode: str = "nose",
             feather: float = 30.0,
             uniform_scale: float | None = None) -> tuple[np.ndarray, dict]:
     """End-to-end Phase 3+4 correction. Returns (corrected_image, debug_info).
 
-    Default mode is z-weighted: per-landmark shrink proportional to depth
-    (closer to camera = more shrink). Set `uniform_scale` to use the legacy
-    uniform shrink (Phase 3 baseline) for ablation.
+    mode="nose" (default): localized nose-region correction. Recommended.
+    mode="perspective": full-face depth re-projection (broader effect but
+        has visible peripheral artifacts).
+    mode="uniform": legacy Phase 3 baseline (requires uniform_scale).
+
     feather > 0 enables Phase 4 boundary blending.
     """
     src_pts, dst_pts = build_point_sets(
-        pts_xyz, image.shape, strength, uniform_scale=uniform_scale,
+        pts_xyz, image.shape, strength,
+        mode=mode, uniform_scale=uniform_scale,
     )
     triangles = triangulate(dst_pts)
     map_x, map_y = build_warp_maps(src_pts, dst_pts, triangles, image.shape)
@@ -233,7 +303,7 @@ def correct(image: np.ndarray, pts_xyz: np.ndarray,
     return corrected_img, {
         "n_triangles": int(triangles.shape[0]),
         "n_src_pts": int(src_pts.shape[0]),
-        "mode": "uniform" if uniform_scale is not None else "perspective",
+        "mode": mode,
         "strength": strength,
         "uniform_scale": uniform_scale,
         "feather": feather,
