@@ -1,4 +1,8 @@
+# bulk per-run artifacts: ignored by default
 *.mp4
 *.csv
 *.npy
 *.png
+# explicitly allow the headline figures referenced from README / report
+!phase6_jitter.png
+!cmdp_eval.png
