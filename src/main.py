@@ -141,13 +141,20 @@ def parse_args() -> argparse.Namespace:
                    help="capture backend (use avfoundation on macOS)")
     p.add_argument("--no-csv", action="store_true",
                    help="skip the per-run metrics CSV log")
-    p.add_argument("--mode", choices=["nose", "perspective", "uniform"],
-                   default="nose",
-                   help="warp mode. 'nose' (default): localized correction "
-                        "of the nose region only -- clean and artifact-free. "
-                        "'perspective': full-face depth re-projection "
-                        "(stronger effect, peripheral artifacts). "
+    p.add_argument("--mode",
+                   choices=["dense", "nose", "perspective", "uniform"],
+                   default="dense",
+                   help="warp mode. 'dense' (default, NEW METHOD): per-pixel "
+                        "perspective re-projection over interpolated "
+                        "MediaPipe depth. Controlled by --alpha. "
+                        "'nose': localized nose-region warp only. "
+                        "'perspective': full-face sparse-landmark depth warp "
+                        "(peripheral artifacts). "
                         "'uniform': legacy Phase 3 baseline.")
+    p.add_argument("--alpha", type=float, default=2.0,
+                   help="dense mode: virtual camera distance ratio. "
+                        "1.0 = no correction, 2.0 = as if shot from 2x as "
+                        "far, infinity = orthographic. Default 2.0.")
     p.add_argument("--strength", type=float, default=0.3,
                    help="correction strength for nose/perspective modes. "
                         "0 = none, 1 = aggressive. Default 0.3. "
@@ -262,6 +269,7 @@ def main() -> None:
                     mode=args.mode,
                     uniform_scale=args.uniform_scale,
                     feather=args.feather,
+                    alpha=args.alpha,
                 )
                 warp_ms = (time.perf_counter() - t_w) * 1000
 
@@ -276,6 +284,8 @@ def main() -> None:
                     mode_str = f"UNIFORM scale={sc:.2f}"
                 elif args.mode == "perspective":
                     mode_str = f"PERSP strength={effective_strength:.2f} ({tag})"
+                elif args.mode == "dense":
+                    mode_str = f"DENSE alpha={args.alpha:.2f}"
                 else:
                     mode_str = f"NOSE strength={effective_strength:.2f} ({tag})"
                 _put(overlay,

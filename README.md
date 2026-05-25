@@ -47,17 +47,26 @@ Keys inside the window:
 - `c` — toggle Phase 3 correction view (raw on left, corrected on right)
 
 CLI flags:
-- `--mode {nose, perspective, uniform}` — correction mode. Default `nose`.
-  - `nose`: localized correction of ~20 nose-region landmarks only.
-    Clean, artifact-free, the recommended setting. The effect is
-    deliberately subtle: subtle nose retreat, everything else untouched.
-  - `perspective`: depth-aware shrink applied to all interior landmarks.
-    Stronger effect but produces peripheral artifacts because sparse 2D
-    landmarks can't represent the full perspective transform without a
-    3D model (see Fried 2016).
-  - `uniform`: legacy Phase 3 baseline (uniform shrink toward face
-    center). Visibly puffs the cheeks; kept only for ablation comparison
-    in the report.
+- `--mode {dense, nose, perspective, uniform}` — correction mode.
+  Default `dense`.
+  - `dense` (NEW METHOD, default): treats MediaPipe (x, y, z) as a
+    sparse depth signal, barycentric-interpolates to a dense per-pixel
+    depth map over the Delaunay mesh, then applies the true pinhole
+    perspective re-projection per pixel:
+    `scale(u,v) = α(t+1)/(t+α)` with `t = z(u,v)/d_old`. Inverse-warp
+    via `cv2.remap`. Controlled by `--alpha`. Smooth depth field =
+    smooth warp = no sparse-landmark artifacts.
+  - `nose`: localized uniform shrink of ~20 nose-region landmarks only.
+    Subtle, artifact-free, no depth math involved.
+  - `perspective`: full-face sparse-landmark depth re-projection.
+    Visible peripheral artifacts (squashed brow / ghosting) because
+    sparse 2D landmark warps can't represent the true 3D perspective
+    transform. Kept for ablation.
+  - `uniform`: legacy Phase 3 baseline (uniform radial shrink). Puffs
+    the cheeks. Kept for ablation comparison.
+- `--alpha 2.0` — `dense` mode: virtual camera distance ratio. `1.0`
+  is no correction; `2.0` is "as if shot from 2× the distance"; large
+  values approach orthographic projection. Default `2.0`.
 - `--strength 0.3` — correction strength for `nose` and `perspective`
   modes. `0` = no correction; `1` = aggressive. Default `0.3`.
 - `--auto-strength` — **derive `strength` per frame from the measured

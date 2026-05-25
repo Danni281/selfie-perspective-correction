@@ -267,20 +267,146 @@ def blend(raw: np.ndarray, corrected: np.ndarray,
     return np.clip(out, 0, 255).astype(raw.dtype)
 
 
+def build_depth_map(pts_xy: np.ndarray, pts_z: np.ndarray,
+                    triangles: np.ndarray,
+                    shape: tuple[int, int, int]) -> np.ndarray:
+    """Rasterize a dense per-pixel depth map by linear (barycentric)
+    interpolation of MediaPipe z across each Delaunay triangle.
+
+    For each triangle we solve the linear system [x, y, 1] @ [a, b, c]^T = z
+    (3 vertices, 3 unknowns) to get the affine z(x, y), then evaluate it on
+    every pixel inside the triangle. Pixels outside every triangle stay 0
+    (treated as background at the face plane => no perspective shift).
+    """
+    h, w = shape[:2]
+    depth = np.zeros((h, w), dtype=np.float32)
+    pts_xy = pts_xy.astype(np.float32)
+    pts_z = pts_z.astype(np.float32)
+
+    for tri in triangles:
+        d = pts_xy[tri]
+        zv = pts_z[tri]
+
+        A = np.column_stack([d, np.ones(3, dtype=np.float32)])
+        try:
+            coeffs = np.linalg.solve(A, zv)
+        except np.linalg.LinAlgError:
+            continue  # degenerate triangle
+
+        xmin = max(0, int(np.floor(d[:, 0].min())))
+        ymin = max(0, int(np.floor(d[:, 1].min())))
+        xmax = min(w, int(np.ceil(d[:, 0].max())) + 1)
+        ymax = min(h, int(np.ceil(d[:, 1].max())) + 1)
+        if xmax <= xmin or ymax <= ymin:
+            continue
+
+        mask = np.zeros((ymax - ymin, xmax - xmin), dtype=np.uint8)
+        local = (d - np.array([[xmin, ymin]], dtype=np.float32)).astype(np.int32)
+        cv2.fillConvexPoly(mask, local, 1)
+        if not mask.any():
+            continue
+
+        yy_loc, xx_loc = np.indices(mask.shape, dtype=np.float32)
+        xx_w = xx_loc + xmin
+        yy_w = yy_loc + ymin
+        z_local = coeffs[0] * xx_w + coeffs[1] * yy_w + coeffs[2]
+
+        sel = mask.astype(bool)
+        depth[ymin:ymax, xmin:xmax][sel] = z_local[sel]
+    return depth
+
+
+def dense_perspective_correct(image: np.ndarray, pts_xyz: np.ndarray,
+                              alpha: float = 2.0,
+                              feather: float = 30.0
+                              ) -> tuple[np.ndarray, dict]:
+    """Phase 3 NEW METHOD: dense depth-driven perspective re-projection.
+
+    Treats MediaPipe (x, y, z) landmarks as a sparse depth signal over the
+    face, interpolates to a dense per-pixel depth map via barycentric over
+    the Delaunay triangulation, then applies the true pinhole perspective
+    re-projection formula per pixel:
+
+        scale(u, v) = alpha * (t + 1) / (t + alpha),    t = z(u, v) / d
+
+    where alpha = d_new / d_old is "how much farther the virtual camera is"
+    (1.0 = no change, 2.0 = double distance, infty = orthographic). The
+    inverse warp coordinates are then  source = (output - center) / scale
+    + center, which cv2.remap consumes directly.
+
+    Unlike sparse-landmark warps (uniform / depth-weighted / nose-only),
+    this produces a smooth warp across a smooth depth field, so there are
+    no triangle-spanning artifacts.
+    """
+    h, w = image.shape[:2]
+    cx, cy = (w - 1) * 0.5, (h - 1) * 0.5
+
+    xy = pts_xyz[:, :2].astype(np.float32)
+    z_px = pts_xyz[:, 2].astype(np.float32)
+    z_face_plane = float(np.median(z_px))
+    z_rel = z_px - z_face_plane  # negative = closer to camera
+
+    # add image corners (background, assumed at face plane) so the
+    # triangulation tiles the whole frame and depth fades to 0 at the
+    # corners
+    anchors = _image_anchors(w, h)
+    anchors_z = np.zeros(len(anchors), dtype=np.float32)
+    all_xy = np.vstack([xy, anchors])
+    all_z = np.concatenate([z_rel, anchors_z])
+
+    triangles = triangulate(all_xy)
+    depth = build_depth_map(all_xy, all_z, triangles, image.shape)
+
+    # face width in pixels is the natural unit; d_old in the same units
+    # is ~3x face width for a typical webcam selfie (~50cm distance,
+    # ~15cm face). We absorb the constant into alpha so the user sees a
+    # single knob: "alpha = 1 -> no correction, alpha = 2 -> as if shot
+    # from twice as far, alpha -> infty -> orthographic."
+    d_old = 0.40 * w  # heuristic; tune via alpha
+    t = depth / d_old
+    # clamp t to avoid the singularity at t = -alpha
+    t = np.clip(t, -0.9 * alpha, 5.0)
+    scale = (alpha * (t + 1.0) / (t + alpha)).astype(np.float32)
+
+    yy, xx = np.indices((h, w), dtype=np.float32)
+    map_x = ((xx - cx) / scale + cx).astype(np.float32)
+    map_y = ((yy - cy) / scale + cy).astype(np.float32)
+
+    warped = cv2.remap(image, map_x, map_y, cv2.INTER_LINEAR,
+                       borderMode=cv2.BORDER_REFLECT)
+    if feather > 0:
+        a = make_alpha_mask(xy, image.shape, feather)
+        corrected_img = blend(image, warped, a)
+    else:
+        corrected_img = warped
+    return corrected_img, {
+        "mode": "dense",
+        "alpha": alpha,
+        "n_triangles": int(triangles.shape[0]),
+        "feather": feather,
+    }
+
+
 def correct(image: np.ndarray, pts_xyz: np.ndarray,
             strength: float = 0.3,
             mode: str = "nose",
             feather: float = 30.0,
-            uniform_scale: float | None = None) -> tuple[np.ndarray, dict]:
+            uniform_scale: float | None = None,
+            alpha: float = 2.0) -> tuple[np.ndarray, dict]:
     """End-to-end Phase 3+4 correction. Returns (corrected_image, debug_info).
 
-    mode="nose" (default): localized nose-region correction. Recommended.
-    mode="perspective": full-face depth re-projection (broader effect but
-        has visible peripheral artifacts).
+    mode="dense" (NEW METHOD): dense per-pixel perspective re-projection
+        driven by interpolated MediaPipe depth. Controlled by `alpha`
+        (virtual-camera distance ratio: 1=none, 2=double).
+    mode="nose" (sparse-landmark default): localized nose-region warp.
+    mode="perspective": full-face sparse depth re-projection (artifacty).
     mode="uniform": legacy Phase 3 baseline (requires uniform_scale).
 
     feather > 0 enables Phase 4 boundary blending.
     """
+    if mode == "dense":
+        return dense_perspective_correct(image, pts_xyz, alpha=alpha,
+                                         feather=feather)
     src_pts, dst_pts = build_point_sets(
         pts_xyz, image.shape, strength,
         mode=mode, uniform_scale=uniform_scale,
