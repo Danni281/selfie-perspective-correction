@@ -20,7 +20,8 @@ import cv2
 import mediapipe as mp
 import numpy as np
 
-from metrics import CSV_FIELDS, compute_metrics, csv_row, hud_text
+from metrics import (CSV_FIELDS, auto_strength, compute_metrics, csv_row,
+                     hud_text)
 import warp as warp_mod
 
 CAPTURE_DIR = Path(__file__).resolve().parents[1] / "captures"
@@ -149,7 +150,17 @@ def parse_args() -> argparse.Namespace:
                         "'uniform': legacy Phase 3 baseline.")
     p.add_argument("--strength", type=float, default=0.3,
                    help="correction strength for nose/perspective modes. "
-                        "0 = none, 1 = aggressive. Default 0.3.")
+                        "0 = none, 1 = aggressive. Default 0.3. "
+                        "Overridden when --auto-strength is set.")
+    p.add_argument("--auto-strength", action="store_true",
+                   help="derive strength per frame from measured nose ratio: "
+                        "strength = clip(1 - target/current, 0, max). "
+                        "Overrides --strength.")
+    p.add_argument("--target-nose-ratio", type=float, default=0.22,
+                   help="nose_w/face_w at neutral portrait distance "
+                        "(~85mm @ 1m). Default 0.22.")
+    p.add_argument("--max-strength", type=float, default=0.6,
+                   help="upper clamp for --auto-strength. Default 0.6.")
     p.add_argument("--uniform-scale", type=float, default=None,
                    help="ABLATION: only used with --mode uniform; shrink "
                         "factor for the legacy uniform Phase 3 baseline.")
@@ -238,11 +249,16 @@ def main() -> None:
 
             corrected = None
             warp_ms = 0.0
+            effective_strength = args.strength
+            if args.auto_strength:
+                effective_strength = auto_strength(
+                    m, args.target_nose_ratio, args.max_strength,
+                )
             if show_correction and pts_xyz is not None and pts_xyz.shape[0] >= 478:
                 t_w = time.perf_counter()
                 corrected, _ = warp_mod.correct(
                     frame_bgr, pts_xyz,
-                    strength=args.strength,
+                    strength=effective_strength,
                     mode=args.mode,
                     uniform_scale=args.uniform_scale,
                     feather=args.feather,
@@ -254,17 +270,23 @@ def main() -> None:
             fps = len(frame_times) / sum(frame_times) if frame_times else 0.0
             draw_hud(overlay, fps, pts_xy is not None, hud_text(m), show_metrics)
             if show_correction:
+                tag = "AUTO" if args.auto_strength else "manual"
                 if args.mode == "uniform":
                     sc = args.uniform_scale if args.uniform_scale is not None else 0.92
                     mode_str = f"UNIFORM scale={sc:.2f}"
                 elif args.mode == "perspective":
-                    mode_str = f"PERSP strength={args.strength:.2f}"
+                    mode_str = f"PERSP strength={effective_strength:.2f} ({tag})"
                 else:
-                    mode_str = f"NOSE strength={args.strength:.2f}"
+                    mode_str = f"NOSE strength={effective_strength:.2f} ({tag})"
                 _put(overlay,
                      f"{mode_str}  feather={args.feather:.0f}"
                      f"  warp={warp_ms:4.1f}ms",
                      (10, h - 36), scale=0.55, color=(0, 200, 255))
+                if args.auto_strength and m is not None:
+                    _put(overlay,
+                         f"nose/Wf {m.nose_w_over_face_w:.3f} -> target "
+                         f"{args.target_nose_ratio:.3f}",
+                         (10, h - 62), scale=0.5, color=(0, 200, 255))
 
             if time.time() < flash_until:
                 _put(overlay, "SAVED", (w // 2 - 80, h // 2),

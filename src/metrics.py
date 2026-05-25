@@ -139,6 +139,40 @@ def csv_row(frame_idx: int, t_seconds: float, fps: float,
     return row
 
 
+# Reference landmark ratios for a "neutral" portrait shot at ~85mm focal
+# length at ~1m distance. Values drawn from face-photography references and
+# Burgos-Artizzu et al. 2014 (CMDP corpus, distance 7).
+PORTRAIT_REFERENCE = {
+    "nose_w_over_face_w": 0.22,
+    "ipd_over_face_w": 0.42,
+    "nose_chin_over_face_w": 0.55,
+    "ear_ear_over_face_h": 0.85,
+}
+
+
+def auto_strength(m: FrameMetrics | None,
+                  target_nose_ratio: float = 0.22,
+                  max_strength: float = 0.6) -> float:
+    """Derive Phase 3 nose-correction strength from measured distortion.
+
+    Uses the primary perspective indicator (nose_width / face_width). At
+    portrait distance the ratio sits near `target_nose_ratio`; at close
+    selfie distance it inflates well above. The derived strength is the
+    fractional shrink needed to bring the current ratio back to target:
+
+        strength = clip(1 - target / current, 0, max_strength)
+
+    This is the bridge between Phase 2 (measure distortion) and Phase 3
+    (apply correction): correction is no longer
+    a hand-tuned constant, it is a function of measured distortion per
+    frame.
+    """
+    if m is None or m.nose_w_over_face_w <= 0:
+        return 0.0
+    raw = 1.0 - target_nose_ratio / m.nose_w_over_face_w
+    return float(max(0.0, min(max_strength, raw)))
+
+
 def hud_text(m: FrameMetrics | None) -> list[str]:
     if m is None:
         return ["IPD/Wf:  ----   nose/Wf:  ----",

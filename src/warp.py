@@ -57,40 +57,34 @@ def _image_anchors(width: int, height: int) -> np.ndarray:
 
 
 def nose_only_target(pts_xyz: np.ndarray, strength: float,
-                     nose_indices: tuple[int, ...] = NOSE_REGION,
-                     center_indices: tuple[int, ...] = FACE_MIDPOINT_REFS
+                     nose_indices: tuple[int, ...] = NOSE_REGION
                      ) -> np.ndarray:
-    """Localized nose-region correction. Everything outside NOSE_REGION is
-    pinned at its original position; nose landmarks are shrunk toward the
-    face midpoint by an amount proportional to their depth offset from the
-    median z.
+    """Localized nose correction: shrink the NOSE_REGION uniformly toward
+    its own centroid by `strength`. Everything outside NOSE_REGION stays
+    pinned.
 
-    Why this is the default mode: broader 2D warps using sparse MediaPipe
-    landmarks ALWAYS produce peripheral artifacts (over-displaced brow
-    landmarks, ghosting along the head outline). Fried 2016 sidesteps this
-    by fitting a 3D morphable model so the warp can be dense and smooth;
-    we don't have that, so we restrict the warp to the region with the
-    largest visible perspective distortion (the nose) and leave the rest
-    of the face untouched. The result is a small but artifact-free
-    correction.
+    Shrinks toward the nose's OWN centroid (not the face midpoint) so the
+    nose stays in the same place visually -- it just gets smaller. That
+    matches what perspective correction should do: the nose was magnified
+    in place by being close to the camera, so the correction shrinks it
+    in place.
 
-    strength ~ 0.2-0.4 is a good range; 0.3 default.
+    Uniform within the region (no per-landmark depth weighting) because
+    we already restricted scope to nose landmarks. Depth weighting INSIDE
+    a small homogeneous region undershrinks the nostrils (they sit at the
+    face plane in z), which prevents the warp from actually reducing the
+    measured nose_w/face_w ratio.
+
+    strength = 0.3 means a 30% inward pull on every NOSE_REGION landmark.
     """
     xy = pts_xyz[:, :2].astype(np.float32)
-    z = pts_xyz[:, 2].astype(np.float32)
     target = xy.copy()
 
     nose = np.asarray(nose_indices, dtype=np.int64)
-    center = xy[list(center_indices)].mean(axis=0)
+    center = xy[nose].mean(axis=0)
 
-    z_median = float(np.median(z))
-    z_front_range = max(z_median - float(z.min()), 1e-6)
-    # negative for landmarks in front of the face plane, clamped at 0 so we
-    # never expand
-    t_nose = np.minimum(0.0, (z[nose] - z_median) / z_front_range)
-    scale = 1.0 + strength * t_nose  # <= 1, smaller for landmarks in front
-
-    target[nose] = center + scale[:, None] * (xy[nose] - center)
+    scale = 1.0 - strength
+    target[nose] = center + scale * (xy[nose] - center)
     return target.astype(np.float32)
 
 

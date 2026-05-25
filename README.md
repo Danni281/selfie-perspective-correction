@@ -60,6 +60,14 @@ CLI flags:
     in the report.
 - `--strength 0.3` — correction strength for `nose` and `perspective`
   modes. `0` = no correction; `1` = aggressive. Default `0.3`.
+- `--auto-strength` — **derive `strength` per frame from the measured
+  nose_w/face_w ratio**: `strength = clip(1 - target / current, 0, max)`.
+  Closes the loop between Phase 2 (measure distortion) and Phase 3
+  (apply correction). When you're close to the camera, correction is
+  strong; when you back away, correction fades to zero.
+- `--target-nose-ratio 0.22` — neutral nose_w/face_w from portrait
+  photography references (~85mm lens at ~1m subject distance).
+- `--max-strength 0.6` — upper clamp for auto-derived strength.
 - `--uniform-scale 0.85` — Phase 3 ablation: shrink factor when
   `--mode uniform`.
 - `--feather 30` — Phase 4 alpha-mask feather radius in pixels. The
