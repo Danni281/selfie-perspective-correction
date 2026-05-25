@@ -98,10 +98,14 @@ nose_chin_over_face_w, ear_ear_over_face_h`. Disable with `--no-csv`.
 ## Layout
 
 ```
-src/main.py        # capture loop + face mesh + metrics HUD + correction view
-src/metrics.py     # landmark indices + per-frame ratio computation
-src/warp.py        # Delaunay piecewise-affine warp (Phase 3)
-captures/          # saved frames + landmarks + corrected pairs (gitignored)
-metrics_logs/      # per-run metrics CSVs (gitignored)
+src/main.py         # live capture + face mesh + metrics HUD + correction view
+src/metrics.py      # landmark indices + per-frame ratio computation + auto-strength
+src/warp.py         # piecewise affine + dense depth-driven warps
+src/smoothing.py    # EMA / Kalman / 1-Euro Filter for landmark streams
+src/process_clip.py # offline: record a clip, run pipeline frame-by-frame
+captures/           # saved live snapshots (gitignored)
+metrics_logs/       # per-run live metrics CSVs (gitignored)
+clips/              # recorded raw mp4s (gitignored)
+results/            # processed mp4s + per-clip CSVs (gitignored)
 requirements.txt
 ```

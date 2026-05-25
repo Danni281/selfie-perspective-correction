@@ -23,6 +23,7 @@ import numpy as np
 from metrics import (CSV_FIELDS, auto_strength, compute_metrics, csv_row,
                      hud_text)
 import warp as warp_mod
+from smoothing import SMOOTHERS, make_smoother
 
 CAPTURE_DIR = Path(__file__).resolve().parents[1] / "captures"
 METRICS_DIR = Path(__file__).resolve().parents[1] / "metrics_logs"
@@ -176,6 +177,15 @@ def parse_args() -> argparse.Namespace:
                         "(0 = no blending, raw Phase 3 output)")
     p.add_argument("--correct-on-start", action="store_true",
                    help="start with side-by-side correction view enabled")
+    p.add_argument("--smooth", choices=list(SMOOTHERS.keys()), default="none",
+                   help="Phase 6 temporal smoother applied to MediaPipe "
+                        "landmarks before metrics/warp. 'none' (default) is "
+                        "the per-frame baseline that produces flicker.")
+    p.add_argument("--ema-alpha", type=float, default=0.7,
+                   help="EMA smoother alpha (history weight). Default 0.7 "
+                        "matches the plan.")
+    p.add_argument("--euro-min-cutoff", type=float, default=1.0)
+    p.add_argument("--euro-beta", type=float, default=0.007)
     return p.parse_args()
 
 
@@ -215,6 +225,16 @@ def main() -> None:
     face_mesh = make_face_mesh(refine=True)
     frame_times: deque[float] = deque(maxlen=30)
 
+    smoother_kwargs: dict[str, float] = {}
+    if args.smooth == "ema":
+        smoother_kwargs["alpha"] = args.ema_alpha
+    elif args.smooth == "oneeuro":
+        smoother_kwargs["min_cutoff"] = args.euro_min_cutoff
+        smoother_kwargs["beta"] = args.euro_beta
+    smoother = make_smoother(args.smooth, **smoother_kwargs)
+    if smoother is not None:
+        print(f"[smooth] using {args.smooth} {smoother_kwargs}", flush=True)
+
     csv_path, csv_fh, csv_writer = open_metrics_csv(args.no_csv)
     if csv_path is not None:
         print(f"[metrics] logging to {csv_path}", flush=True)
@@ -246,7 +266,12 @@ def main() -> None:
             pts_xy = None
             if result.multi_face_landmarks:
                 pts_xyz = landmarks_to_xyz(result.multi_face_landmarks[0], w, h)
+                if smoother is not None:
+                    pts_xyz = smoother.update(pts_xyz,
+                                              time.perf_counter() - t_start)
                 pts_xy = pts_xyz[:, :2]
+            elif smoother is not None:
+                smoother.reset()
 
             m = compute_metrics(pts_xy) if pts_xy is not None else None
 
@@ -277,6 +302,9 @@ def main() -> None:
             frame_times.append(dt)
             fps = len(frame_times) / sum(frame_times) if frame_times else 0.0
             draw_hud(overlay, fps, pts_xy is not None, hud_text(m), show_metrics)
+            if args.smooth != "none":
+                _put(overlay, f"smooth: {args.smooth}", (10, h - 88),
+                     scale=0.5, color=(200, 200, 255))
             if show_correction:
                 tag = "AUTO" if args.auto_strength else "manual"
                 if args.mode == "uniform":
