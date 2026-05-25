@@ -140,10 +140,10 @@ def parse_args() -> argparse.Namespace:
                    help="capture backend (use avfoundation on macOS)")
     p.add_argument("--no-csv", action="store_true",
                    help="skip the per-run metrics CSV log")
-    p.add_argument("--strength", type=float, default=0.15,
-                   help="z-weighted shrink strength: fraction by which the "
-                        "closest-to-camera landmark is pulled toward face "
-                        "center; farthest landmark is untouched. 0 disables.")
+    p.add_argument("--strength", type=float, default=0.5,
+                   help="perspective correction strength (mimics a longer "
+                        "focal length). 0 = no change, 1 = full orthographic. "
+                        "0.3-0.6 looks natural for a typical webcam selfie.")
     p.add_argument("--uniform-scale", type=float, default=None,
                    help="ABLATION: use Phase 3 uniform shrink (e.g. 0.85) "
                         "instead of z-weighted. Overrides --strength.")
@@ -250,7 +250,7 @@ def main() -> None:
                 if args.uniform_scale is not None:
                     mode_str = f"UNIFORM scale={args.uniform_scale:.2f}"
                 else:
-                    mode_str = f"DEPTH strength={args.strength:.2f}"
+                    mode_str = f"PERSP strength={args.strength:.2f}"
                 _put(overlay,
                      f"{mode_str}  feather={args.feather:.0f}"
                      f"  warp={warp_ms:4.1f}ms",
@@ -284,7 +284,7 @@ def main() -> None:
                     frame_bgr, overlay, pts_xyz,
                     frame_corrected=corrected,
                     mode=("uniform" if args.uniform_scale is not None
-                          else "depth") if corrected is not None else None,
+                          else "perspective") if corrected is not None else None,
                     strength=args.strength if corrected is not None else None,
                     uniform_scale=args.uniform_scale if corrected is not None else None,
                     feather=args.feather if corrected is not None else None,

@@ -43,35 +43,40 @@ def _image_anchors(width: int, height: int) -> np.ndarray:
     )
 
 
-def depth_weighted_target(pts_xyz: np.ndarray, strength: float,
-                          fixed_indices: tuple[int, ...] = FACE_OVAL) -> np.ndarray:
-    """Z-weighted shrink: each landmark moves toward the face center by an
-    amount proportional to how close it is to the camera, per MediaPipe z.
+def perspective_target(pts_xyz: np.ndarray, strength: float,
+                       face_plane_indices: tuple[int, ...] = FACE_OVAL
+                       ) -> np.ndarray:
+    """Mimic a longer focal length / greater camera distance.
 
-    The closest landmark (smallest z) is shrunk by `strength` (e.g. 0.15 = 15%
-    pull toward center). The farthest landmark is not moved at all. FACE_OVAL
-    is always fixed so the head outline is preserved.
+    For each landmark we compute its depth offset relative to the FACE_OVAL
+    plane and apply the symmetric perspective re-projection:
 
-    pts_xyz: (N, 3) array where columns are (x_px, y_px, z_mediapipe).
+        new_radial = (1 + strength * t) * old_radial
+
+    where t = (z - z_face_plane) / z_range is in roughly [-1, 1]. Features in
+    front of the face plane (t < 0, e.g. nose tip) move INWARD; features
+    behind it (t > 0, e.g. back of jaw, ears) move OUTWARD; landmarks at the
+    face plane (t ~ 0, e.g. cheekbones) barely move. This is the standard
+    "telephoto compression" effect a longer lens produces, applied per
+    landmark.
+
+    strength ~ 0.3-0.6 looks natural; strength=1.0 approximates an
+    orthographic projection (face fully "flattened").
     """
     xy = pts_xyz[:, :2].astype(np.float32)
     z = pts_xyz[:, 2].astype(np.float32)
 
-    fixed = np.asarray(fixed_indices, dtype=np.int64)
-    center = xy[fixed].mean(axis=0)
+    plane = np.asarray(face_plane_indices, dtype=np.int64)
+    center = xy[plane].mean(axis=0)
+    z_face_plane = float(z[plane].mean())
 
-    z_min, z_max = float(z.min()), float(z.max())
-    if z_max - z_min < 1e-6:
-        # degenerate (e.g. synthetic test data); fall back to uniform
-        normalized = np.zeros_like(z)
-    else:
-        # 1.0 at the closest landmark, 0.0 at the farthest
-        normalized = (z_max - z) / (z_max - z_min)
+    z_offset = z - z_face_plane
+    z_range = max(abs(z.max() - z_face_plane),
+                  abs(z_face_plane - z.min()), 1e-6)
+    t = z_offset / z_range  # roughly in [-1, 1]
 
-    per_lm_scale = 1.0 - strength * normalized
-    per_lm_scale[fixed] = 1.0  # head outline is locked
-
-    target = center + per_lm_scale[:, None] * (xy - center)
+    radial = 1.0 + strength * t
+    target = center + radial[:, None] * (xy - center)
     return target.astype(np.float32)
 
 
@@ -103,7 +108,7 @@ def build_point_sets(pts_xyz: np.ndarray, shape: tuple[int, int, int],
     if uniform_scale is not None:
         target_xy = uniform_target(pts_xyz, uniform_scale)
     else:
-        target_xy = depth_weighted_target(pts_xyz, strength)
+        target_xy = perspective_target(pts_xyz, strength)
     src_xy = pts_xyz[:, :2].astype(np.float32)
     src_pts = np.vstack([src_xy, anchors])
     dst_pts = np.vstack([target_xy, anchors])
@@ -228,7 +233,7 @@ def correct(image: np.ndarray, pts_xyz: np.ndarray,
     return corrected_img, {
         "n_triangles": int(triangles.shape[0]),
         "n_src_pts": int(src_pts.shape[0]),
-        "mode": "uniform" if uniform_scale is not None else "depth",
+        "mode": "uniform" if uniform_scale is not None else "perspective",
         "strength": strength,
         "uniform_scale": uniform_scale,
         "feather": feather,
