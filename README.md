@@ -19,6 +19,7 @@ reduces that perspective distortion and stays temporally stable across frames.
 | 6 | Temporal smoothing (EMA + Kalman) | todo |
 | 7 | Real-time optimization (30 FPS live) | todo |
 | 8 | Evaluation script | todo |
+| 8.5 | CMDP cross-subject evaluation (51 subjects × 7 distances) | done |
 
 
 ## Setup
