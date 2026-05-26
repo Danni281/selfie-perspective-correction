@@ -186,6 +186,14 @@ def parse_args() -> argparse.Namespace:
                         "matches the plan.")
     p.add_argument("--euro-min-cutoff", type=float, default=1.0)
     p.add_argument("--euro-beta", type=float, default=0.007)
+    p.add_argument("--depth-downsample", type=int, default=2,
+                   help="Phase 7: rasterize the dense depth map at "
+                        "shape/this. 2 ~= no quality loss, big speedup.")
+    p.add_argument("--process-downsample", type=int, default=1,
+                   help="Phase 7: run the entire warp pipeline at "
+                        "shape/this then upscale. 2 doubles FPS but "
+                        "softens the output; recommended only for live "
+                        "preview, not for saved comparisons.")
     return p.parse_args()
 
 
@@ -295,6 +303,8 @@ def main() -> None:
                     uniform_scale=args.uniform_scale,
                     feather=args.feather,
                     alpha=args.alpha,
+                    depth_downsample=args.depth_downsample,
+                    process_downsample=args.process_downsample,
                 )
                 warp_ms = (time.perf_counter() - t_w) * 1000
 

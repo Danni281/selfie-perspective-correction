@@ -162,6 +162,8 @@ def cmd_run(args: argparse.Namespace) -> None:
                     frame, pts_xyz,
                     strength=args.strength, mode=args.mode,
                     feather=args.feather, alpha=args.alpha,
+                    depth_downsample=args.depth_downsample,
+                    process_downsample=args.process_downsample,
                 )
                 warp_total_ms += (time.perf_counter() - t_w) * 1000
 
@@ -223,6 +225,8 @@ def main() -> None:
     pn.add_argument("--ema-alpha", type=float, default=0.7)
     pn.add_argument("--euro-min-cutoff", type=float, default=1.0)
     pn.add_argument("--euro-beta", type=float, default=0.007)
+    pn.add_argument("--depth-downsample", type=int, default=2)
+    pn.add_argument("--process-downsample", type=int, default=1)
     pn.set_defaults(func=cmd_run)
 
     args = p.parse_args()
