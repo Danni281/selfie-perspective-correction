@@ -1,0 +1,69 @@
+{
+  "clip": "clips/raw_20260525-152000.mp4",
+  "config": {
+    "clip": "clips/raw_20260525-152000.mp4",
+    "out_prefix": "eval_default",
+    "mode": "dense",
+    "alpha": 2.0,
+    "feather": 30.0,
+    "depth_downsample": 2,
+    "process_downsample": 1
+  },
+  "variants": {
+    "raw": {
+      "n_frames": 300,
+      "mean_mp_ms": 2.572690026330141,
+      "mean_warp_ms": 0.0,
+      "mean_total_ms": 2.7391267251611375,
+      "p95_total_ms": 3.1162771047092974,
+      "fps_mean": 365.07985950930106,
+      "pre_ratio_mean": 0.3074759983297321,
+      "post_ratio_mean": null,
+      "frame_to_frame_jitter_mean_px": 4.071364402770996
+    },
+    "per_frame": {
+      "n_frames": 300,
+      "mean_mp_ms": 2.8888575008992725,
+      "mean_warp_ms": 36.118553512496874,
+      "mean_total_ms": 42.4983423789187,
+      "p95_total_ms": 46.12182082491927,
+      "fps_mean": 23.530329514594197,
+      "pre_ratio_mean": 0.3075986654515165,
+      "post_ratio_mean": 0.3042339826153292,
+      "frame_to_frame_jitter_mean_px": 4.048957347869873
+    },
+    "ema": {
+      "n_frames": 300,
+      "mean_mp_ms": 2.8742527581440904,
+      "mean_warp_ms": 36.11824374936987,
+      "mean_total_ms": 42.5038922422876,
+      "p95_total_ms": 45.86814197245985,
+      "fps_mean": 23.527257087413016,
+      "pre_ratio_mean": 0.3076090707502545,
+      "post_ratio_mean": 0.3045560048670541,
+      "frame_to_frame_jitter_mean_px": 3.2875545024871826
+    },
+    "kalman": {
+      "n_frames": 300,
+      "mean_mp_ms": 3.006121540286889,
+      "mean_warp_ms": 37.55311094922945,
+      "mean_total_ms": 44.057296116564736,
+      "p95_total_ms": 46.84173567220569,
+      "fps_mean": 22.697716113904193,
+      "pre_ratio_mean": 0.3075420877285159,
+      "post_ratio_mean": 0.30433705761741825,
+      "frame_to_frame_jitter_mean_px": 3.6963400840759277
+    },
+    "oneeuro": {
+      "n_frames": 300,
+      "mean_mp_ms": 2.9300600197166204,
+      "mean_warp_ms": 37.467301668560445,
+      "mean_total_ms": 43.82698009721935,
+      "p95_total_ms": 46.303391639958136,
+      "fps_mean": 22.81699532529384,
+      "pre_ratio_mean": 0.30748594745759794,
+      "post_ratio_mean": 0.3043278264758492,
+      "frame_to_frame_jitter_mean_px": 3.4084439277648926
+    }
+  }
+}
