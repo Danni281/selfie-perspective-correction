@@ -330,7 +330,8 @@ def dense_perspective_correct(image: np.ndarray, pts_xyz: np.ndarray,
                               alpha: float = 2.0,
                               feather: float = 30.0,
                               depth_downsample: int = 2,
-                              process_downsample: int = 1
+                              process_downsample: int = 1,
+                              depth_override: np.ndarray | None = None
                               ) -> tuple[np.ndarray, dict]:
     """Phase 3 NEW METHOD: dense depth-driven perspective re-projection.
 
@@ -374,11 +375,19 @@ def dense_perspective_correct(image: np.ndarray, pts_xyz: np.ndarray,
     all_xy = np.vstack([xy, anchors])
     all_z = np.concatenate([z_rel, anchors_z])
 
-    # depth is smooth -- rasterize at reduced resolution then upscale.
-    # depth_downsample=2 gives a 4x speedup on build_depth_map and on the
-    # downstream pixel math, with no visible quality loss. =1 disables.
+    # depth source: external (learned, e.g. Depth Anything V2) or
+    # barycentric-interpolated MediaPipe z over Delaunay (sparse default).
     ds = max(1, int(depth_downsample))
-    if ds > 1 and w // ds >= 64:
+    if depth_override is not None:
+        d_src = depth_override
+        if d_src.shape != (h, w):
+            d_src = cv2.resize(d_src, (w, h), interpolation=cv2.INTER_LINEAR)
+        # standardize external depth to face-plane = 0 so the perspective
+        # formula behaves the same way as with MediaPipe-z input
+        depth = (d_src - float(np.median(d_src))).astype(np.float32)
+        n_triangles = 0  # not used for the external-depth path
+        depth_source = "external"
+    elif ds > 1 and w // ds >= 64:
         small_w, small_h = w // ds, h // ds
         small_xy = all_xy / ds
         small_tris = triangulate(small_xy)
@@ -386,10 +395,12 @@ def dense_perspective_correct(image: np.ndarray, pts_xyz: np.ndarray,
                                       (small_h, small_w, 3))
         depth = cv2.resize(small_depth, (w, h), interpolation=cv2.INTER_LINEAR)
         n_triangles = small_tris.shape[0]
+        depth_source = "mediapipe"
     else:
         triangles = triangulate(all_xy)
         depth = build_depth_map(all_xy, all_z, triangles, work_img.shape)
         n_triangles = triangles.shape[0]
+        depth_source = "mediapipe"
 
     # face width in pixels is the natural unit; d_old in the same units
     # is ~3x face width for a typical webcam selfie (~50cm distance,
@@ -426,6 +437,7 @@ def dense_perspective_correct(image: np.ndarray, pts_xyz: np.ndarray,
         "feather": feather,
         "depth_downsample": ds,
         "process_downsample": ps,
+        "depth_source": depth_source,
     }
 
 
@@ -436,7 +448,9 @@ def correct(image: np.ndarray, pts_xyz: np.ndarray,
             uniform_scale: float | None = None,
             alpha: float = 2.0,
             depth_downsample: int = 2,
-            process_downsample: int = 1) -> tuple[np.ndarray, dict]:
+            process_downsample: int = 1,
+            depth_override: np.ndarray | None = None
+            ) -> tuple[np.ndarray, dict]:
     """End-to-end Phase 3+4 correction. Returns (corrected_image, debug_info).
 
     mode="dense" (NEW METHOD): dense per-pixel perspective re-projection
@@ -452,7 +466,8 @@ def correct(image: np.ndarray, pts_xyz: np.ndarray,
         return dense_perspective_correct(image, pts_xyz, alpha=alpha,
                                          feather=feather,
                                          depth_downsample=depth_downsample,
-                                         process_downsample=process_downsample)
+                                         process_downsample=process_downsample,
+                                         depth_override=depth_override)
     src_pts, dst_pts = build_point_sets(
         pts_xyz, image.shape, strength,
         mode=mode, uniform_scale=uniform_scale,
