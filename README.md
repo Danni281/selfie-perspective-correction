@@ -15,12 +15,15 @@ reduces that perspective distortion and stays temporally stable across frames.
 | 2 | Per-frame landmark-ratio metrics + CSV log | done |
 | 3 | Single-frame correction (Delaunay warp) | done |
 | 4 | Boundary blending mask | done |
-| 5 | Per-frame baseline video | todo |
-| 6 | Temporal smoothing (EMA + Kalman) | todo |
+| 5 | Per-frame baseline video | done |
+| 6 | Temporal smoothing (EMA + Kalman + 1-Euro) | done |
 | 7 | Real-time optimization (30 FPS live) | done |
 | 8 | Evaluation script | done |
 | 8.5 | CMDP cross-subject evaluation (51 subjects × 7 distances) | done |
+| 9 | ML depth source (Depth Anything V2) | coded, run on GPU box |
 
+The ML extension runs on the Windows + NVIDIA
+box per [report/RUN_ON_WINDOWS_GPU.md](report/RUN_ON_WINDOWS_GPU.md).
 
 ## Setup
 
