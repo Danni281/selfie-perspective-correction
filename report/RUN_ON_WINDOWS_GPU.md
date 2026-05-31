@@ -10,9 +10,11 @@ of human time.
 git clone https://github.com/Danni281/selfie-perspective-correction.git
 cd selfie-perspective-correction
 
-# install Python 3.12 if you do not have it
-#   https://www.python.org/downloads/release/python-3120/
-#   tick "Add python.exe to PATH" in the installer
+# install Python 3.12 if you do not have it (winget is easiest):
+#   winget install --id Python.Python.3.12 --scope user
+#   - or download https://www.python.org/downloads/release/python-3120/
+#     and tick "Add python.exe to PATH" in the installer
+# winget also installs the `py` launcher; reopen the shell so PATH updates.
 
 py -3.12 -m venv .venv
 .venv\Scripts\activate
@@ -20,58 +22,59 @@ py -3.12 -m venv .venv
 # project dependencies
 pip install -r requirements.txt
 
-# PyTorch with CUDA 12.6 wheels (Blackwell-compatible, works on the 5070 Ti)
-pip install --index-url https://download.pytorch.org/whl/cu126 torch torchvision
+# PyTorch with CUDA 12.8 wheels. The 5070 Ti (incl. the Laptop GPU) is
+# Blackwell = compute capability sm_120. The cu126 wheels are built only for
+# sm_50..sm_90, so torch.cuda.is_available() returns True but the first real
+# GPU op dies with "no kernel image is available for execution on the device".
+# The cu128 wheels include sm_120 (cu128 currently resolves to torch 2.11).
+pip install --index-url https://download.pytorch.org/whl/cu128 torch torchvision
 
 # Depth Anything V2 wrapper deps
 pip install transformers pillow accelerate
 ```
 
-Sanity check that CUDA sees the GPU.
+Sanity check that CUDA can actually run a kernel. Do NOT rely on
+`torch.cuda.is_available()` alone — it returns True even when the wheel has no
+sm_120 kernels for this GPU. Force a real op:
 
 ```powershell
-python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
-# expect:  True NVIDIA GeForce RTX 5070 Ti
+python -c "import torch; print(torch.cuda.get_arch_list()); print(torch.cuda.get_device_name(0)); x=torch.randn(2000,2000,device='cuda'); print('gpu ok', float((x@x).sum()))"
+# expect arch_list to include 'sm_120' and a number printed after 'gpu ok'.
 ```
 
-If `torch.cuda.is_available()` is `False`, update the NVIDIA driver to a
-576+ build and reboot. CUDA 12.6 runtime ships inside the wheel; you do not
-need a CUDA toolkit install.
+If the matmul raises "no kernel image is available", the wheel lacks sm_120
+(you installed a cu126 build); reinstall from the cu128 index above. If
+instead `is_available()` is False, update the NVIDIA driver (576+; this box
+runs 592.02 / CUDA 13.1) and reboot. The CUDA runtime ships inside the wheel;
+no CUDA toolkit install is needed.
 
 ## 2. Pull the CMDP images down
 
-The annotations are in the repo. The image archives are too large for git,
-download them once.
+The annotations are already committed in the repo (`data\cmdp\CMDP-ANNO`), so
+you only need the two image archives. They are too large for git.
+
+The Caltech Data `/content` endpoint 302-redirects to a short-lived (60 s)
+presigned S3 URL. `curl.exe -L` follows that redirect and downloads the real
+zip in one shot, so the old "read the redirect as text" two-step is wrong and
+unnecessary (with -L, curl already fetches the actual file). Use plain curl:
 
 ```powershell
-mkdir data\cmdp
 cd data\cmdp
 
-# CMDP annotations
-curl -L -o CMDP-ANNO.zip "https://data.caltech.edu/api/records/n5vnm-mqr05/files/CMDP-ANNO.zip/content"
-# the API returns a redirect URL as text; fetch the real file from there
-$url = Get-Content CMDP-ANNO.zip
-Remove-Item CMDP-ANNO.zip
-curl -L -o CMDP-ANNO.zip $url
-Expand-Archive CMDP-ANNO.zip -DestinationPath . -Force
+# CMDP_1.zip (~315 MB), CMDP_2.zip (~269 MB)
+curl.exe -L --fail -o CMDP_1.zip "https://data.caltech.edu/api/records/n5vnm-mqr05/files/CMDP_1.zip/content"
+curl.exe -L --fail -o CMDP_2.zip "https://data.caltech.edu/api/records/n5vnm-mqr05/files/CMDP_2.zip/content"
 
-# CMDP_1.zip (~330MB)
-curl -L -o CMDP_1.zip "https://data.caltech.edu/api/records/n5vnm-mqr05/files/CMDP_1.zip/content"
-$url = Get-Content CMDP_1.zip
-Remove-Item CMDP_1.zip
-curl -L -o CMDP_1.zip $url
-mkdir images
+# each zip's top-level folder is CMDP_1\ or CMDP_2\, so extract into images\
 Expand-Archive CMDP_1.zip -DestinationPath images -Force
-
-# CMDP_2.zip (~280MB)
-curl -L -o CMDP_2.zip "https://data.caltech.edu/api/records/n5vnm-mqr05/files/CMDP_2.zip/content"
-$url = Get-Content CMDP_2.zip
-Remove-Item CMDP_2.zip
-curl -L -o CMDP_2.zip $url
 Expand-Archive CMDP_2.zip -DestinationPath images -Force
 
 cd ..\..
 ```
+
+You should now have `data\cmdp\images\CMDP_1\<subject>\...jpg` and
+`...\CMDP_2\...`, 51 subjects total. Expand-Archive also creates a harmless
+`images\__MACOSX` folder; ignore it.
 
 ## 3. Run the experiments
 
@@ -80,9 +83,13 @@ Approx wall time on a 5070 Ti is in brackets.
 
 ### A. Single-image qualitative comparison (~3 s, sanity check)
 
+`captures\` is gitignored, so the original selfie snapshot is absent from a
+fresh clone. Point this at any face image; a close-range (2 ft) CMDP image is
+a good stand-in once section 2 is done:
+
 ```powershell
-python src\ml_compare.py image captures\20260525-151052_raw.png
-# saves results\ml_compare_20260525-151052_raw.png
+python src\ml_compare.py image data\cmdp\images\CMDP_1\1_K36K\K36K-060208_2.jpg
+# saves results\ml_compare_K36K-060208_2.png
 # prints raw / MediaPipe-corrected / ML-corrected nose_w_over_face_w
 ```
 
