@@ -183,32 +183,51 @@ def auto_alpha(m: FrameMetrics | None,
                neutral_ratio: float = NEUTRAL_NOSE_RATIO,
                gain: float = 10.0,
                max_alpha: float = 2.5,
-               deadzone: float = 0.06) -> float:
+               deadzone: float = 0.03) -> float:
     """Derive the dense-mode virtual-camera ratio `alpha` from measured
     distortion, so the live correction adapts to camera distance.
 
     alpha is the dense warp's knob: 1.0 = no correction, larger = stronger
     (as if shot from farther with a longer lens). We map the fractional
-    inflation of nose_w/face_w above the empirically-undistorted reference
-    (CMDP 16 ft mean, 0.277) to alpha, after subtracting a dead-zone:
+    inflation of nose_w/face_w above a NEUTRAL reference to alpha:
 
         excess = current / neutral - 1
         alpha  = clip(1 + gain * max(0, excess - deadzone), 1.0, max_alpha)
 
-    The `deadzone` (default 0.06 = 6%) means a face whose nose ratio is only
-    mildly above neutral -- i.e. shot at a normal/far distance, or just a
-    person whose face is naturally a bit wider than the population mean -- is
-    left EXACTLY untouched (alpha = 1.0). The warp only engages once the
-    measured distortion clearly exceeds the dead-zone, which happens at close
-    selfie range. Subtracting the dead-zone (rather than hard-gating) keeps
-    alpha continuous at the threshold, so there is no visible pop as you lean
-    in. Returns 1.0 (no correction) when no face is measured.
+    IMPORTANT -- person dependence. nose_w/face_w is person-specific: across
+    51 CMDP subjects the undistorted (16 ft) ratio has std ~0.014, so one
+    person's distorted close-up can read the same as another's neutral face.
+    A single population `neutral_ratio` (the CMDP 16 ft mean, 0.277) therefore
+    over- or under-corrects individuals. The fix is to pass that person's OWN
+    neutral ratio, captured once at a far/normal distance -- see
+    `calibrate_neutral` and the `--auto-alpha` + 'k' calibration key in
+    main.py. With a per-user neutral, `excess` is a true distance signal.
+
+    `deadzone` (default 0.03) is just a small noise floor so landmark jitter
+    near neutral does not trigger a tiny warp; it is NOT meant to absorb
+    person-dependence (that is what calibration is for). Subtracting it keeps
+    alpha continuous at the threshold (no pop as you lean in). Returns 1.0
+    (no correction) when no face is measured.
     """
     if m is None or m.nose_w_over_face_w <= 0 or neutral_ratio <= 0:
         return 1.0
     excess = m.nose_w_over_face_w / neutral_ratio - 1.0
     alpha = 1.0 + gain * max(0.0, excess - deadzone)
     return float(max(1.0, min(max_alpha, alpha)))
+
+
+def calibrate_neutral(samples: list[FrameMetrics]) -> float | None:
+    """Return the median nose_w/face_w over a list of FrameMetrics captured
+    at a far/normal distance -- the user's personal undistorted baseline.
+
+    Median (not mean) so a couple of bad-detection frames during the capture
+    window do not skew the baseline. Returns None if no valid samples.
+    """
+    vals = [s.nose_w_over_face_w for s in samples
+            if s is not None and s.nose_w_over_face_w > 0]
+    if not vals:
+        return None
+    return float(np.median(vals))
 
 
 def hud_text(m: FrameMetrics | None) -> list[str]:

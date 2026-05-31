@@ -20,8 +20,8 @@ import cv2
 import mediapipe as mp
 import numpy as np
 
-from metrics import (CSV_FIELDS, auto_alpha, auto_strength, compute_metrics,
-                     csv_row, hud_text)
+from metrics import (CSV_FIELDS, NEUTRAL_NOSE_RATIO, auto_alpha, auto_strength,
+                     calibrate_neutral, compute_metrics, csv_row, hud_text)
 import warp as warp_mod
 from smoothing import SMOOTHERS, make_smoother
 
@@ -160,7 +160,12 @@ def parse_args() -> argparse.Namespace:
                    help="dense mode: derive alpha per frame from measured "
                         "nose ratio so correction adapts to camera distance "
                         "(close=strong, far=off). EMA-smoothed. Overrides "
-                        "--alpha.")
+                        "--alpha. Press 'k' to calibrate your personal "
+                        "neutral baseline (sit back first).")
+    p.add_argument("--neutral-ratio", type=float, default=None,
+                   help="your personal undistorted nose_w/face_w baseline for "
+                        "--auto-alpha. If omitted, uses the population mean "
+                        "(0.277) until you press 'k' to calibrate.")
     p.add_argument("--strength", type=float, default=0.3,
                    help="correction strength for nose/perspective modes. "
                         "0 = none, 1 = aggressive. Default 0.3. "
@@ -260,6 +265,12 @@ def main() -> None:
     show_metrics = True
     show_correction = args.correct_on_start
     auto_alpha_state = [None]  # EMA state for --auto-alpha (mutable cell)
+    # per-user calibration: 'k' captures ~30 frames of the user's face at a
+    # far/normal distance and stores the median nose ratio as their personal
+    # neutral baseline, so auto-alpha measures distortion relative to THEM.
+    user_neutral = [args.neutral_ratio]   # mutable cell; None until set/CLI
+    calib_samples: list = []
+    calib_until = [0.0]
     frame_idx = 0
     t_start = time.perf_counter()
 
@@ -300,10 +311,25 @@ def main() -> None:
                 effective_strength = auto_strength(
                     m, args.target_nose_ratio, args.max_strength,
                 )
+            # collect calibration samples while a 'k' window is open
+            if calib_until[0] > time.time() and m is not None:
+                calib_samples.append(m)
+            elif calib_until[0] != 0.0 and time.time() >= calib_until[0]:
+                # window just closed -> finalize the personal neutral
+                nb = calibrate_neutral(calib_samples)
+                if nb is not None:
+                    user_neutral[0] = nb
+                    print(f"[calib] personal neutral nose/Wf = {nb:.3f} "
+                          f"from {len(calib_samples)} frames", flush=True)
+                calib_samples.clear()
+                calib_until[0] = 0.0
+
             # dense-mode auto-alpha: derive per frame from distortion, then
-            # EMA-smooth so the correction does not pulse frame to frame
+            # EMA-smooth so the correction does not pulse frame to frame.
+            # Uses the per-user neutral if calibrated, else the population mean.
             if args.auto_alpha:
-                target_alpha = auto_alpha(m)
+                neutral = user_neutral[0] or NEUTRAL_NOSE_RATIO
+                target_alpha = auto_alpha(m, neutral_ratio=neutral)
                 if auto_alpha_state[0] is None:
                     auto_alpha_state[0] = target_alpha
                 else:
@@ -358,6 +384,15 @@ def main() -> None:
             if time.time() < flash_until:
                 _put(overlay, "SAVED", (w // 2 - 80, h // 2),
                      scale=2.0, color=(0, 255, 0))
+
+            if calib_until[0] > time.time():
+                secs = calib_until[0] - time.time()
+                _put(overlay,
+                     f"CALIBRATING... sit at normal distance ({secs:.0f}s)",
+                     (10, 90), scale=0.7, color=(0, 255, 255))
+            elif args.auto_alpha and user_neutral[0]:
+                _put(overlay, f"neutral={user_neutral[0]:.3f}", (10, 90),
+                     scale=0.5, color=(0, 200, 255))
 
             if show_correction and corrected is not None:
                 _put(corrected, "CORRECTED", (10, 30), scale=0.7,
