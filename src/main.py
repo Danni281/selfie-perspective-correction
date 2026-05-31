@@ -20,8 +20,8 @@ import cv2
 import mediapipe as mp
 import numpy as np
 
-from metrics import (CSV_FIELDS, auto_strength, compute_metrics, csv_row,
-                     hud_text)
+from metrics import (CSV_FIELDS, auto_alpha, auto_strength, compute_metrics,
+                     csv_row, hud_text)
 import warp as warp_mod
 from smoothing import SMOOTHERS, make_smoother
 
@@ -156,6 +156,11 @@ def parse_args() -> argparse.Namespace:
                    help="dense mode: virtual camera distance ratio. "
                         "1.0 = no correction, 2.0 = as if shot from 2x as "
                         "far, infinity = orthographic. Default 2.0.")
+    p.add_argument("--auto-alpha", action="store_true",
+                   help="dense mode: derive alpha per frame from measured "
+                        "nose ratio so correction adapts to camera distance "
+                        "(close=strong, far=off). EMA-smoothed. Overrides "
+                        "--alpha.")
     p.add_argument("--strength", type=float, default=0.3,
                    help="correction strength for nose/perspective modes. "
                         "0 = none, 1 = aggressive. Default 0.3. "
@@ -254,6 +259,7 @@ def main() -> None:
     flash_until = 0.0
     show_metrics = True
     show_correction = args.correct_on_start
+    auto_alpha_state = [None]  # EMA state for --auto-alpha (mutable cell)
     frame_idx = 0
     t_start = time.perf_counter()
 
@@ -294,6 +300,18 @@ def main() -> None:
                 effective_strength = auto_strength(
                     m, args.target_nose_ratio, args.max_strength,
                 )
+            # dense-mode auto-alpha: derive per frame from distortion, then
+            # EMA-smooth so the correction does not pulse frame to frame
+            if args.auto_alpha:
+                target_alpha = auto_alpha(m)
+                if auto_alpha_state[0] is None:
+                    auto_alpha_state[0] = target_alpha
+                else:
+                    auto_alpha_state[0] = (0.85 * auto_alpha_state[0]
+                                           + 0.15 * target_alpha)
+                effective_alpha = auto_alpha_state[0]
+            else:
+                effective_alpha = args.alpha
             if show_correction and pts_xyz is not None and pts_xyz.shape[0] >= 478:
                 t_w = time.perf_counter()
                 corrected, _ = warp_mod.correct(
@@ -302,7 +320,7 @@ def main() -> None:
                     mode=args.mode,
                     uniform_scale=args.uniform_scale,
                     feather=args.feather,
-                    alpha=args.alpha,
+                    alpha=effective_alpha,
                     depth_downsample=args.depth_downsample,
                     process_downsample=args.process_downsample,
                 )
@@ -323,7 +341,8 @@ def main() -> None:
                 elif args.mode == "perspective":
                     mode_str = f"PERSP strength={effective_strength:.2f} ({tag})"
                 elif args.mode == "dense":
-                    mode_str = f"DENSE alpha={args.alpha:.2f}"
+                    atag = "AUTO" if args.auto_alpha else "manual"
+                    mode_str = f"DENSE alpha={effective_alpha:.2f} ({atag})"
                 else:
                     mode_str = f"NOSE strength={effective_strength:.2f} ({tag})"
                 _put(overlay,

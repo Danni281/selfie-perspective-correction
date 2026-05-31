@@ -173,6 +173,38 @@ def auto_strength(m: FrameMetrics | None,
     return float(max(0.0, min(max_strength, raw)))
 
 
+# Empirically-undistorted nose ratio: the CMDP 16 ft (farthest, GT) mean
+# across 51 subjects. A face measured at or below this needs no correction;
+# above it, the excess is perspective distortion to undo.
+NEUTRAL_NOSE_RATIO = 0.277
+
+
+def auto_alpha(m: FrameMetrics | None,
+               neutral_ratio: float = NEUTRAL_NOSE_RATIO,
+               gain: float = 10.0,
+               max_alpha: float = 2.5) -> float:
+    """Derive the dense-mode virtual-camera ratio `alpha` from measured
+    distortion, so the live correction adapts to camera distance.
+
+    alpha is the dense warp's knob: 1.0 = no correction, larger = stronger
+    (as if shot from farther with a longer lens). We map the fractional
+    inflation of nose_w/face_w above the empirically-undistorted reference
+    (CMDP 16 ft mean, 0.277) to alpha:
+
+        alpha = clip(1 + gain * (current / neutral - 1), 1.0, max_alpha)
+
+    Close selfies inflate the ratio so alpha rises; at portrait distance the
+    ratio is near neutral so alpha falls to ~1.0 and the warp is a no-op.
+    This is why a far-away shot should NOT be over-thinned: auto-alpha backs
+    off on its own. Returns 1.0 (no correction) when no face is measured.
+    """
+    if m is None or m.nose_w_over_face_w <= 0 or neutral_ratio <= 0:
+        return 1.0
+    excess = m.nose_w_over_face_w / neutral_ratio - 1.0
+    alpha = 1.0 + gain * max(0.0, excess)
+    return float(max(1.0, min(max_alpha, alpha)))
+
+
 def hud_text(m: FrameMetrics | None) -> list[str]:
     if m is None:
         return ["IPD/Wf:  ----   nose/Wf:  ----",
