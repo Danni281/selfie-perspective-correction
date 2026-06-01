@@ -434,10 +434,16 @@ def main() -> None:
             elif key == ord("c"):
                 show_correction = not show_correction
                 print(f"[hud] correction {'on' if show_correction else 'off'}"
-                      f" (scale={args.scale})", flush=True)
+                      f" (mode={args.mode})", flush=True)
+            elif key == ord("k"):
+                # open a 2s calibration window; samples gathered in the loop
+                calib_samples.clear()
+                calib_until[0] = time.time() + 2.0
+                print("[calib] hold still at a normal/far distance for 2s...",
+                      flush=True)
             else:
                 print(f"[key] unknown keycode {key} (focus the video window, "
-                      f"then press s/m/c/q)", flush=True)
+                      f"then press s/m/c/k/q)", flush=True)
     finally:
         cap.release()
         cv2.destroyAllWindows()
