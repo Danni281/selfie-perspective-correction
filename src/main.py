@@ -82,7 +82,7 @@ def draw_hud(frame: np.ndarray, fps: float, face_detected: bool,
         for i, line in enumerate(metrics_lines):
             _put(frame, line, (10, y_top + 26 + i * line_h), scale=0.7,
                  color=(0, 255, 255))  # BGR yellow
-    hint = "q quit | s save | m metrics"
+    hint = "q quit | s save | m metrics | c dots | [ / ] alpha | k calib"
     _put(frame, hint, (10, frame.shape[0] - 12), scale=0.55,
          color=(255, 255, 255))
 
@@ -264,6 +264,8 @@ def main() -> None:
     flash_until = 0.0
     show_metrics = True
     show_correction = args.correct_on_start
+    show_dots = True          # 'c' toggles the green landmark dots
+    manual_alpha = [args.alpha]  # '[' / ']' nudge this live (mutable cell)
     auto_alpha_state = [None]  # EMA state for --auto-alpha (mutable cell)
     # per-user calibration: 'k' captures ~30 frames of the user's face at a
     # far/normal distance and stores the median nose ratio as their personal
@@ -301,7 +303,7 @@ def main() -> None:
             m = compute_metrics(pts_xy) if pts_xy is not None else None
 
             overlay = frame_bgr.copy()
-            if pts_xy is not None:
+            if pts_xy is not None and show_dots:
                 draw_landmarks(overlay, pts_xy)
 
             corrected = None
@@ -337,7 +339,7 @@ def main() -> None:
                                            + 0.15 * target_alpha)
                 effective_alpha = auto_alpha_state[0]
             else:
-                effective_alpha = args.alpha
+                effective_alpha = manual_alpha[0]
             if show_correction and pts_xyz is not None and pts_xyz.shape[0] >= 478:
                 t_w = time.perf_counter()
                 corrected, _ = warp_mod.correct(
@@ -432,9 +434,19 @@ def main() -> None:
                 print(f"[hud] metrics {'on' if show_metrics else 'off'}",
                       flush=True)
             elif key == ord("c"):
+                show_dots = not show_dots
+                print(f"[hud] landmark dots {'on' if show_dots else 'off'}",
+                      flush=True)
+            elif key == ord("v"):
                 show_correction = not show_correction
-                print(f"[hud] correction {'on' if show_correction else 'off'}"
-                      f" (mode={args.mode})", flush=True)
+                print(f"[hud] correction view "
+                      f"{'on' if show_correction else 'off'}", flush=True)
+            elif key in (ord("]"), ord("=")):  # ] or + (no shift needed for =)
+                manual_alpha[0] = min(4.0, manual_alpha[0] + 0.1)
+                print(f"[alpha] manual alpha = {manual_alpha[0]:.2f}", flush=True)
+            elif key in (ord("["), ord("-")):
+                manual_alpha[0] = max(1.0, manual_alpha[0] - 0.1)
+                print(f"[alpha] manual alpha = {manual_alpha[0]:.2f}", flush=True)
             elif key == ord("k"):
                 # open a 2s calibration window; samples gathered in the loop
                 calib_samples.clear()
@@ -443,7 +455,7 @@ def main() -> None:
                       flush=True)
             else:
                 print(f"[key] unknown keycode {key} (focus the video window, "
-                      f"then press s/m/c/k/q)", flush=True)
+                      f"then press s/m/c/v/k/[/]/q)", flush=True)
     finally:
         cap.release()
         cv2.destroyAllWindows()
