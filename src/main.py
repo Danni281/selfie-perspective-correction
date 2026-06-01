@@ -82,7 +82,7 @@ def draw_hud(frame: np.ndarray, fps: float, face_detected: bool,
         for i, line in enumerate(metrics_lines):
             _put(frame, line, (10, y_top + 26 + i * line_h), scale=0.7,
                  color=(0, 255, 255))  # BGR yellow
-    hint = "q quit | s save | m metrics | c dots | [ / ] alpha | k calib"
+    hint = "q quit | r REC | s save | c dots | [ / ] alpha | k calib"
     _put(frame, hint, (10, frame.shape[0] - 12), scale=0.55,
          color=(255, 255, 255))
 
@@ -266,6 +266,8 @@ def main() -> None:
     show_correction = args.correct_on_start
     show_dots = True          # 'c' toggles the green landmark dots
     manual_alpha = [args.alpha]  # '[' / ']' nudge this live (mutable cell)
+    recorder = [None]         # 'r' toggles screen-recording of the view
+    rec_size = [None]         # fixed (w, h) the active recorder was opened at
     auto_alpha_state = [None]  # EMA state for --auto-alpha (mutable cell)
     # per-user calibration: 'k' captures ~30 frames of the user's face at a
     # far/normal distance and stores the median nose ratio as their personal
@@ -402,6 +404,22 @@ def main() -> None:
                 display = np.hstack([overlay, corrected])
             else:
                 display = overlay
+            # write the exact on-screen view to the recorder if active. A red
+            # REC dot is burned in so the recording self-documents. The view
+            # is resized to the writer's fixed frame size so toggling the
+            # correction panel mid-record doesn't break the mp4.
+            if recorder[0] is not None:
+                rec_frame = display
+                if (rec_frame.shape[1], rec_frame.shape[0]) != rec_size[0]:
+                    rec_frame = cv2.resize(rec_frame, rec_size[0])
+                else:
+                    rec_frame = rec_frame.copy()
+                cv2.circle(rec_frame, (rec_frame.shape[1] - 40, 30), 10,
+                           (0, 0, 255), -1)
+                _put(rec_frame, "REC", (rec_frame.shape[1] - 110, 38),
+                     scale=0.7, color=(0, 0, 255))
+                recorder[0].write(rec_frame)
+
             cv2.imshow(window, display)
 
             if csv_writer is not None:
@@ -429,6 +447,21 @@ def main() -> None:
                 print(f"[save] {path.parent}/{path.stem.rsplit('_', 1)[0]}_*  "
                       f"({tag})", flush=True)
                 flash_until = time.time() + 0.6
+            elif key == ord("r"):
+                if recorder[0] is None:
+                    CLIP_DIR = Path(__file__).resolve().parents[1] / "clips"
+                    CLIP_DIR.mkdir(parents=True, exist_ok=True)
+                    rp = CLIP_DIR / f"demo_{time.strftime('%Y%m%d-%H%M%S')}.mp4"
+                    sz = (display.shape[1], display.shape[0])
+                    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                    recorder[0] = cv2.VideoWriter(str(rp), fourcc, 20.0, sz)
+                    rec_size[0] = sz
+                    print(f"[rec] RECORDING -> {rp}  (press r again to stop)",
+                          flush=True)
+                else:
+                    recorder[0].release()
+                    recorder[0] = None
+                    print("[rec] stopped, saved to clips/", flush=True)
             elif key == ord("m"):
                 show_metrics = not show_metrics
                 print(f"[hud] metrics {'on' if show_metrics else 'off'}",
@@ -455,9 +488,12 @@ def main() -> None:
                       flush=True)
             else:
                 print(f"[key] unknown keycode {key} (focus the video window, "
-                      f"then press s/m/c/v/k/[/]/q)", flush=True)
+                      f"then press r/s/m/c/v/k/[/]/q)", flush=True)
     finally:
         cap.release()
+        if recorder[0] is not None:
+            recorder[0].release()
+            print("[rec] recording finalized on exit", flush=True)
         cv2.destroyAllWindows()
         face_mesh.close()
         if csv_fh is not None:
