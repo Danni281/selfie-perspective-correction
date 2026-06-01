@@ -13,3 +13,5 @@ metrics_logs/*.csv
 !metrics_logs/.gitkeep
 # report PDFs and HTML are kept in git
 
+report/demo_slides.pdf
+slides_build/node_modules/
