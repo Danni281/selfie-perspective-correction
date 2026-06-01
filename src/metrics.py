@@ -181,9 +181,9 @@ NEUTRAL_NOSE_RATIO = 0.277
 
 def auto_alpha(m: FrameMetrics | None,
                neutral_ratio: float = NEUTRAL_NOSE_RATIO,
-               gain: float = 10.0,
-               max_alpha: float = 2.5,
-               deadzone: float = 0.03) -> float:
+               gain: float = 18.0,
+               max_alpha: float = 3.0,
+               deadzone: float = 0.02) -> float:
     """Derive the dense-mode virtual-camera ratio `alpha` from measured
     distortion, so the live correction adapts to camera distance.
 
