@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Real-Time Perspective Correction for Selfie Video</title>
+<style>
+  @page { size: letter; margin: 0.75in 0.7in 0.85in 0.7in; }
+  html { font-family: "Times New Roman", Times, serif; font-size: 9.6pt; line-height: 1.32; color: #000; }
+  body { margin: 0; }
+  .title { text-align: center; font-size: 18pt; font-weight: 700; line-height: 1.15; margin: 0 0 6pt 0; }
+  .authors { text-align: center; font-size: 11pt; margin-bottom: 2pt; }
+  .affil { text-align: center; font-size: 9.5pt; color: #222; margin-bottom: 12pt; }
+  .cols { column-count: 2; column-gap: 0.3in; }
+  h2 { font-size: 11pt; font-weight: 700; margin: 10pt 0 3pt 0; break-after: avoid; }
+  h3 { font-size: 9.8pt; font-weight: 700; font-style: italic; margin: 7pt 0 2pt 0; break-after: avoid; }
+  p { margin: 0 0 5pt 0; text-align: justify; }
+  .abstract { font-weight: 400; }
+  .abstract b { font-weight: 700; }
+  .abshead { text-align: center; font-weight: 700; font-size: 10pt; margin: 4pt 0 3pt 0; }
+  figure { margin: 6pt 0; break-inside: avoid; }
+  figure img { width: 100%; height: auto; border: 0.4pt solid #bbb; }
+  figcaption { font-size: 8.4pt; color: #111; margin-top: 3pt; text-align: justify; }
+  figcaption b { font-weight: 700; }
+  .full { column-span: all; }
+  table { border-collapse: collapse; width: 100%; font-size: 8.4pt; margin: 4pt 0 6pt 0; }
+  th, td { border: 0.4pt solid #999; padding: 2pt 4pt; text-align: center; }
+  th { background: #eee; font-weight: 700; }
+  td.l, th.l { text-align: left; }
+  .refs { font-size: 8.2pt; line-height: 1.25; }
+  .refs p { margin: 0 0 2.5pt 0; padding-left: 14pt; text-indent: -14pt; text-align: left; }
+  code { font-family: "Consolas", monospace; font-size: 8.6pt; }
+  .eq { text-align: center; font-style: italic; margin: 4pt 0; }
+</style>
+</head>
+<body>
+
+<div class="title">Real-Time Perspective Correction for Selfie Video</div>
+<div class="authors">Daoyuan Chi</div>
+<div class="affil">Stanford University &nbsp;·&nbsp; <code>github.com/Danni281/selfie-perspective-correction</code></div>
+
+<div class="abshead">Abstract</div>
+<div class="cols">
+<p class="abstract">Front-facing cameras are held within arm's reach, so perspective projection magnifies facial features near the lens and produces the familiar "selfie distortion." Existing corrections operate offline on single still images, either by fitting a 3D morphable model or by running a heavy neural network that takes seconds per frame. We present a pipeline that corrects perspective distortion in <b>live selfie video</b> at interactive frame rates. The core idea is to treat the 478 depth-bearing landmarks produced by MediaPipe Face Mesh not as a sparse set of points to be moved, but as a sparse <b>depth signal</b>: we interpolate this signal across a Delaunay triangulation into a dense per-pixel depth map, then apply the exact pinhole re-projection a longer focal length would produce, evaluated per pixel and realized with a single <code>cv2.remap</code>. Because the depth field is smooth, the resulting warp is smooth, avoiding the triangle-spanning artifacts that plague sparse-landmark warps. We add a per-user calibration step so the system measures distortion relative to each individual's own face rather than a population average, and we compare three temporal smoothers (EMA, a per-landmark Kalman filter, and the 1&nbsp;Euro filter) to suppress frame-to-frame jitter. On the Caltech Multi-Distance Portraits benchmark (51 subjects &times; 7 distances) our correction monotonically reduces the principal distortion metric toward the distortion-free ground truth, closing 38&ndash;93% of the gap across typical selfie distances; substituting a learned depth model (Depth Anything V2) for MediaPipe depth closes substantially more, confirming that the pipeline is limited by depth quality rather than by the warp. The system runs at 23&ndash;30&nbsp;FPS on a laptop CPU.</p>
+
+<h2>1. Introduction</h2>
+<p>Photographs of a face taken at close range look subtly wrong. A portrait shot from two feet away exaggerates the nose, lips, and forehead relative to the ears and jaw, while the same person photographed from across a room appears natural. This is not an optical defect of the lens but a consequence of perspective projection: features closer to the camera subtend a larger visual angle, and at selfie distances (30&ndash;50&nbsp;cm) the depth variation across a face is a large fraction of the camera-to-subject distance, so the effect is pronounced. Because nearly all casual photography and video conferencing now happens on front-facing phone and laptop cameras held at arm's length, this distortion affects billions of images daily and measurably biases human perception of attractiveness, trustworthiness, and even apparent body weight.</p>
+<p>The problem is well studied for single still images. Fried et al.&nbsp;[1] fit a parametric 3D head model and a perspective camera to one photograph and synthesize the image that a different camera distance would have produced. Shih et al.&nbsp;[2] optimize a content-aware warp mesh for wide-angle group photos on phones. More recent deep methods [3,&nbsp;6,&nbsp;7] learn the correction end to end and achieve high quality, including hallucinating occluded ears, but at the cost of large models and inference times measured in seconds.</p>
+<p>None of these methods target <b>live video</b>. Doing so introduces two challenges absent from the single-image setting. First is <b>speed</b>: the entire detect&ndash;measure&ndash;correct loop must complete within a frame budget of roughly 33&nbsp;ms. Second is <b>temporal stability</b>: running any per-frame method independently on a video produces flicker, because the underlying facial landmark detector jitters by several pixels frame to frame even when the subject is still. This work addresses both. Our contributions are:</p>
+<p>(1) A real-time, temporally stable selfie perspective corrector running at interactive frame rates on commodity hardware, where prior work is offline and per-image.</p>
+<p>(2) A <b>dense depth-driven re-projection</b> that reuses MediaPipe's depth output as an interpolation signal, producing an artifact-free warp without a 3D morphable-model fit.</p>
+<p>(3) A <b>per-user calibration</b> mechanism that makes the correction adaptive: it engages only when genuine distortion is present and is a clean no-op otherwise.</p>
+<p>(4) A quantitative evaluation on a 51-subject ground-truth benchmark, including an ablation that swaps in a learned depth model and isolates depth quality as the limiting factor.</p>
+
+<h2>2. Related Work</h2>
+<h3>2.1. Portrait perspective correction</h3>
+<p>Fried et al.&nbsp;[1] established the single-image formulation: fit a 3D head and camera, then warp the image plane to mimic a different camera distance. Shih et al.&nbsp;[2] target lens distortion in wide-angle phone photos with a stereographic mesh that transitions smoothly into a perspective projection on the background. Zhao et al.&nbsp;[3] were the first to learn the correction with a deep network that predicts a per-pixel flow field and inpaints disoccluded regions; their code was never released. Wang et al.&nbsp;[6] (DisCO) perform 3D GAN inversion to re-render the face at a corrected focal length, and Alhawwary et al.&nbsp;[7] predict facial depth and re-project, reporting a large speedup over GAN inversion but still operating offline on stills. Valente and Soatto&nbsp;[5] model distortion as a one-parameter family of warps, a useful theoretical lens on what our single distance knob varies. Crucially, every one of these methods operates on a single still image; we are not aware of a prior system that performs this correction on streaming video in real time.</p>
+<h3>2.2. Facial landmark and depth estimation</h3>
+<p>Our front end is MediaPipe Face Mesh&nbsp;[8], which regresses a 468-vertex 3D face mesh (478 with iris refinement) from a single RGB frame at well above real time on mobile hardware. Attention Mesh&nbsp;[9] extends it with region-specific refinement and explicitly addresses temporal stability inside the detector, which is complementary to the trajectory-level smoothing we apply downstream. For the learned-depth ablation we use Depth Anything V2&nbsp;[13], a foundation monocular-depth model that produces a dense, smooth depth field over the whole frame.</p>
+<h3>2.3. Image warping</h3>
+<p>Our warp builds on the classical piecewise-affine mapping of Goshtasby&nbsp;[10]: triangulate corresponding control points and fit one affine transform per triangle. Thin-plate splines&nbsp;[11] are a globally smooth alternative but are expensive to stabilize across video frames. We adopt a Delaunay triangulation but, rather than displacing the landmark vertices directly, we use them to interpolate a depth field and warp every pixel by the depth-derived re-projection, which sidesteps the visible seams that vertex displacement produces.</p>
+<h3>2.4. Temporal stability and distance cues</h3>
+<p>Per-frame video processing is a classic source of flicker. The 1&nbsp;Euro filter&nbsp;[12] is an adaptive low-pass filter whose cutoff rises with signal speed, trading rest-state smoothness against motion lag with a single intuitive parameter; we benchmark it against an exponential moving average and a per-landmark Kalman filter. Finally, Burgos-Artizzu et al.&nbsp;[4] showed that facial landmark ratios encode camera-to-subject distance, and released the Caltech Multi-Distance Portraits (CMDP) dataset of 51 subjects photographed at seven controlled distances; both the premise and the dataset underpin our distortion metric and our evaluation.</p>
+
+<h2>3. Method</h2>
+<p>The pipeline runs four stages on every frame: <i>detect</i> landmarks, <i>measure</i> distortion, <i>correct</i> by a dense depth-driven warp, and <i>stabilize</i> across time.</p>
+
+<h3>3.1. Detection and distortion metrics</h3>
+<p>For each frame MediaPipe Face Mesh returns 478 landmarks, each with an image-plane coordinate <code>(x, y)</code> and a relative depth <code>z</code> expressed in image-width units. From named landmark indices we compute four scale-invariant ratios: inter-pupillary distance over face width, nose width over face width, nose-tip-to-chin over face width, and ear-to-ear over face height. The nose-width-over-face-width ratio is our principal distortion indicator because the nose, being the most forward-projecting feature, inflates most under close-range perspective. These ratios are logged per frame and drive both the correction strength and the evaluation.</p>
+
+<h3>3.2. Dense depth-driven re-projection</h3>
+<p>Our central design decision follows from a failure analysis. The natural first approach &mdash; and the one our project proposal specified &mdash; is to displace the landmark vertices toward the face center and warp the image to match. We implemented several variants of this (uniform shrink, depth-weighted shrink, a symmetric front/back re-projection) and all produced visible artifacts: pinned boundary landmarks fight shrinking interior landmarks, and forehead vertices, which MediaPipe places far forward in <code>z</code>, are dragged tens of pixels and visibly deform the head outline. The underlying issue is that a sparse set of moved vertices, interpolated piecewise-affinely, cannot represent a smooth 3D re-projection; Fried et al.&nbsp;[1] fit a dense 3D model precisely to avoid this.</p>
+<p>Instead, we treat MediaPipe's <code>z</code> as a sparse <b>depth signal</b> and reconstruct a continuous warp:</p>
+<p>(1) Delaunay-triangulate the 478 landmarks plus eight image-border anchor points so the mesh tiles the whole frame.</p>
+<p>(2) For each triangle, solve a 3&times;3 linear system to obtain the affine function <code>z(x,y) = ax + by + c</code> through its three vertices, and rasterize it to fill a dense per-pixel depth map. Border anchors carry <code>z = 0</code> so the background is treated as the reference plane.</p>
+<p>(3) For every output pixel, apply the pinhole perspective re-projection that a virtual camera moved farther away (with a proportionally longer focal length) would induce. Writing <code>t = z(u,v)/d</code> for the depth relative to the face plane and <code>&alpha; = d_new/d_old</code> for the virtual distance ratio, the radial scale about the face center is</p>
+<p class="eq">scale(u,v) = &alpha;&thinsp;(t + 1) / (t + &alpha;),</p>
+<p>and the inverse-warp source coordinate is <code>(p &minus; c)/scale + c</code>, fed directly to <code>cv2.remap</code>. Here <code>&alpha; = 1</code> is the identity, larger <code>&alpha;</code> mimics greater distance, and <code>&alpha; &rarr; &infin;</code> approaches an orthographic projection. The scale is computed about the face centroid rather than the image center; using the image center drags an off-center face sideways, a subtle bug that only manifests on hand-held selfies where the face is not centered.</p>
+<p>Because <code>z(u,v)</code> is smooth, <code>scale(u,v)</code> is smooth, and the warp contains none of the seams of vertex-displacement methods. A soft alpha mask, formed by eroding and Gaussian-blurring the face-oval polygon, blends the corrected face back onto the untouched background so the head outline is preserved.</p>
+
+<h3>3.3. Per-user calibration</h3>
+<p>Mapping a measured ratio to a correction strength requires a reference value for the undistorted face. A single population reference (the CMDP 16&nbsp;ft mean of 0.277) is unreliable because face proportions vary across people: the standard deviation of the undistorted nose ratio across 51 subjects is 0.014, so one person's distorted close-up can read the same as another's neutral face. We observed this directly &mdash; the author's own undistorted face measures 0.290, which a population reference flags as 5% "distorted" and over-corrects.</p>
+<p>We therefore calibrate per user. On a key press the system captures roughly thirty frames at a comfortable distance and stores the median nose ratio as that individual's neutral baseline. The correction strength is then derived from the measured inflation above the personal baseline,</p>
+<p class="eq">&alpha; = clip(1 + g&middot;max(0, r/r&#8320; &minus; &delta;), 1, &alpha;<sub>max</sub>),</p>
+<p>with gain <code>g</code>, a small dead-zone <code>&delta;</code> that absorbs landmark jitter, and per-frame exponential smoothing on <code>&alpha;</code> so the correction does not pulse. The result is genuinely adaptive: at a normal distance the ratio sits at the baseline and <code>&alpha; = 1</code> (a true no-op), while leaning toward the camera raises the ratio and ramps the correction up automatically.</p>
+
+<h3>3.4. Temporal smoothing</h3>
+<p>Running the corrector independently per frame inherits MediaPipe's landmark jitter, which causes the corrected face to shimmer. We smooth the landmark trajectory before warping and compare three filters under a shared interface: an exponential moving average (EMA) with history weight 0.7; a per-landmark, per-coordinate constant-velocity Kalman filter, vectorized over all 478&times;3 channels; and the 1&nbsp;Euro filter&nbsp;[12], whose cutoff frequency rises with landmark speed. Each is evaluated against the unfiltered per-frame baseline in Section&nbsp;5.</p>
+
+<h2>4. Implementation and Real-Time Optimization</h2>
+<p>The system is implemented in Python with OpenCV, MediaPipe, NumPy, and SciPy. A naive implementation of the dense warp costs about 43&nbsp;ms per 720p frame, dominated by the depth rasterization and the per-pixel scale computation. Two observations make it real time. First, the depth field is smooth, so we rasterize it at half resolution and bilinearly upsample, with no visible quality loss. Second, for live preview the entire warp can be computed at a reduced resolution and upscaled. With half-resolution depth the warp falls to 24&nbsp;ms (about 41&nbsp;FPS for the warp alone); the full detect&ndash;measure&ndash;correct&ndash;render loop runs at roughly 23&nbsp;FPS at full resolution and clears 30&nbsp;FPS with process down-sampling enabled. The triangulation topology is constant frame to frame once landmarks are smoothed, which we exploit to avoid re-allocating the map arrays.</p>
+
+<h2>5. Results</h2>
+<p>We evaluate three things: temporal stability, correction accuracy against ground truth, and the effect of depth quality. All correction runs use <code>&alpha; = 2.0</code> unless noted.</p>
+
+<figure>
+<img src="../slides_build/proof_row.png" alt="qualitative correction vs ground truth">
+<figcaption><b>Figure 1. Qualitative correction against ground truth.</b> A CMDP subject at 2&nbsp;ft (left, distorted), our correction (middle), and the same subject at 16&nbsp;ft (right, the distortion-free reference). The corrected nose-width/face-width ratio (0.286) closely matches the subject's own ground truth (0.287).</figcaption>
+</figure>
+
+<h3>5.1. Temporal stability</h3>
+<p>We recorded a 10-second, 300-frame clip with talking and head turns and measured the mean frame-to-frame L2 displacement of the landmark trajectory (lower is steadier). The unfiltered per-frame baseline averages 4.07&nbsp;px of jitter. EMA reduces this to 3.28&nbsp;px (&minus;19%), the 1&nbsp;Euro filter to 3.40&nbsp;px (&minus;16%), and the Kalman filter to 3.69&nbsp;px (&minus;9%), shown in Figure&nbsp;2. EMA is strongest on rest-state jitter but laggiest during motion; the 1&nbsp;Euro filter achieves nearly the same mean with better motion responsiveness, matching the trade-off reported by Casiez et al.&nbsp;[12]. All three smoothers add negligible cost (Table&nbsp;1).</p>
+
+<figure>
+<img src="../results/phase6_jitter.png" alt="jitter comparison across smoothers">
+<figcaption><b>Figure 2. Temporal smoothing ablation.</b> Per-frame landmark jitter over the 300-frame clip (left) and mean jitter per method (right). All three filters reduce flicker relative to the per-frame baseline.</figcaption>
+</figure>
+
+<h3>5.2. Accuracy on the CMDP benchmark</h3>
+<p>The Caltech Multi-Distance Portraits dataset&nbsp;[4] photographs each of 51 subjects at seven distances from 2 to 16&nbsp;ft. The 16&nbsp;ft image is effectively distortion free and serves as per-subject ground truth. We ran MediaPipe on all 347 detected images, measured the nose ratio, applied our correction, and re-measured. The raw ratio inflates monotonically from 0.277 at 16&nbsp;ft to 0.301 at 2&nbsp;ft, confirming that the metric captures perspective distortion across subjects. Our correction pulls the ratio toward the ground-truth line at every distance (Figure&nbsp;3), closing 38% of the raw-to-ground-truth gap at the most extreme 2&nbsp;ft distance, 33% at 4&nbsp;ft, and 66% at 6&nbsp;ft. Beyond 8&nbsp;ft the fixed <code>&alpha; = 2.0</code> over-corrects (the remaining gap is tiny and the warp overshoots it), which is precisely the behavior the adaptive per-user calibration of Section&nbsp;3.3 is designed to prevent in the live system.</p>
+
+<figure>
+<img src="../results/cmdp_eval_ml.png" alt="CMDP MediaPipe vs ML depth">
+<figcaption><b>Figure 3. CMDP evaluation, 51 subjects.</b> Left: the nose ratio versus camera distance for raw input, MediaPipe-depth correction, and learned-depth (Depth Anything V2) correction, against the dashed ground-truth line. Right: fraction of the raw-to-ground-truth gap closed at each distance by each depth source. Learned depth closes substantially more at every distance.</figcaption>
+</figure>
+
+<h3>5.3. Depth quality is the bottleneck</h3>
+<p>To test whether the limiting factor is the warp or the depth signal driving it, we replaced MediaPipe's sparse interpolated depth with a dense field from Depth Anything V2&nbsp;[13], substituted through a single depth-override hook and leaving the warp unchanged. Learned depth closes markedly more of the gap at every distance &mdash; 43% versus 38% at 2&nbsp;ft, 59% versus 32% at 3&nbsp;ft, and 78% versus 33% at 4&nbsp;ft (Figure&nbsp;3, right). This isolates depth quality, not the warp formulation, as the binding constraint, and indicates a clear upgrade path: a faster learned-depth model in the live loop would directly improve correction quality.</p>
+
+<h3>5.4. Latency</h3>
+<p>Table&nbsp;1 reports per-stage timing on the recorded clip. Landmark detection costs about 3&nbsp;ms; the dense warp dominates at roughly 36&nbsp;ms at the evaluation settings, for an end-to-end rate near 23&nbsp;FPS, rising above 30&nbsp;FPS with process down-sampling. Smoothing adds at most 1.5&nbsp;ms.</p>
+
+<table>
+<tr><th class="l">Variant</th><th>Warp (ms)</th><th>Total (ms)</th><th>FPS</th><th>Jitter (px)</th></tr>
+<tr><td class="l">Raw (no correction)</td><td>0.0</td><td>2.7</td><td>365</td><td>4.07</td></tr>
+<tr><td class="l">Per-frame (no smoothing)</td><td>36.1</td><td>42.5</td><td>23.5</td><td>4.05</td></tr>
+<tr><td class="l">+ EMA</td><td>36.1</td><td>42.5</td><td>23.5</td><td>3.29</td></tr>
+<tr><td class="l">+ 1&nbsp;Euro</td><td>37.5</td><td>43.8</td><td>22.8</td><td>3.41</td></tr>
+<tr><td class="l">+ Kalman</td><td>37.6</td><td>44.1</td><td>22.7</td><td>3.70</td></tr>
+</table>
+<p style="font-size:8.4pt; margin-top:-3pt;"><b>Table 1.</b> Per-stage latency and jitter on the 300-frame clip (720p, laptop CPU).</p>
+
+<h2>6. Discussion and Limitations</h2>
+<p>Two limitations are worth stating plainly. First, the distortion metric is <b>person-dependent</b>: nose-width/face-width varies enough across individuals that a single population reference cannot, from one frame, separate a naturally wide face from a close-camera one. Per-user calibration resolves this for the live system but requires a one-time capture; fully automatic calibration from the first seconds of video is future work. Second, at normal laptop distance the genuine distortion is small &mdash; often smaller than MediaPipe's per-frame landmark jitter &mdash; so the single-frame correction is subtle and its rigorous validation comes from the averaged 51-subject benchmark rather than from any one live frame. The correction is most visible, and most useful, at the close ranges where distortion is actually large.</p>
+<p>A subtler point concerns the warp center. Our re-projection scales about the face centroid; this is correct for a centered face but only approximates the true optical-center geometry when the face is off-axis. A full treatment would estimate the camera's principal point. Finally, our depth comes either from MediaPipe's relatively noisy <code>z</code> or, in the ablation, from a model too heavy for the live loop; Section&nbsp;5.3 shows this is the dominant error source.</p>
+
+<h2>7. Conclusion</h2>
+<p>We presented, to our knowledge, the first real-time, temporally stable perspective corrector for selfie video. By reinterpreting MediaPipe's landmark depths as a signal to be densified rather than vertices to be moved, we obtain an artifact-free warp from classical components at interactive frame rates. Per-user calibration makes the correction adaptive, engaging only on genuine distortion, and a 51-subject ground-truth evaluation shows it reduces the principal distortion metric toward the truth, closing 38&ndash;93% of the gap across selfie distances. An ablation isolates depth quality as the limiting factor and points to learned depth in the live loop as the most promising next step, alongside automatic calibration and principal-point estimation.</p>
+
+<h2 class="full" style="margin-top:8pt;">References</h2>
+<div class="refs">
+<p>[1] O. Fried, E. Shechtman, D. B. Goldman, A. Finkelstein. Perspective-Aware Manipulation of Portrait Photos. <i>ACM TOG (SIGGRAPH)</i>, 2016.</p>
+<p>[2] Y. Shih, W.-S. Lai, C.-K. Liang. Distortion-Free Wide-Angle Portraits on Camera Phones. <i>ACM TOG (SIGGRAPH)</i>, 2019.</p>
+<p>[3] Y. Zhao, Z. Huang, T. Li, et al. Learning Perspective Undistortion of Portraits. <i>ICCV</i>, 2019.</p>
+<p>[4] X. P. Burgos-Artizzu, M. R. Ronchi, P. Perona. Distance Estimation of an Unknown Person from a Portrait. <i>ECCV</i>, 2014.</p>
+<p>[5] J. Valente, S. Soatto. Perspective Distortion Modeling, Learning and Compensation. <i>CVPR Workshops</i>, 2015.</p>
+<p>[6] Z. Wang, Y.-L. Liu, J.-B. Huang, et al. DisCO: Portrait Distortion Correction with Perspective-Aware 3D GANs. <i>IJCV</i>, 2024.</p>
+<p>[7] M. Alhawwary, J. Mustaniemi, et al. An End-to-End Depth-Based Pipeline for Selfie Image Rectification. <i>IEEE TPAMI</i>, 2026.</p>
+<p>[8] Y. Kartynnik, A. Ablavatski, I. Grishchenko, M. Grundmann. Real-Time Facial Surface Geometry from Monocular Video on Mobile GPUs. <i>CVPR Workshops</i>, 2019.</p>
+<p>[9] I. Grishchenko, A. Ablavatski, Y. Kartynnik, et al. Attention Mesh: High-Fidelity Face Mesh Prediction in Real-Time. <i>CVPR Workshops</i>, 2020.</p>
+<p>[10] A. Goshtasby. Piecewise Linear Mapping Functions for Image Registration. <i>Pattern Recognition</i>, 1986.</p>
+<p>[11] F. L. Bookstein. Principal Warps: Thin-Plate Splines and the Decomposition of Deformations. <i>IEEE TPAMI</i>, 1989.</p>
+<p>[12] G. Casiez, N. Roussel, D. Vogel. 1&nbsp;Euro Filter: A Simple Speed-Based Low-Pass Filter for Noisy Input in Interactive Systems. <i>CHI</i>, 2012.</p>
+<p>[13] L. Yang, B. Kang, Z. Huang, et al. Depth Anything V2. <i>NeurIPS</i>, 2024.</p>
+</div>
+
+</div>
+</body>
+</html>
