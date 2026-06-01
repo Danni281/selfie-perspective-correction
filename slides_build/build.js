@@ -1,301 +1,158 @@
 // Demo deck — Real-Time Perspective Correction for Selfie Video
+// Plain, modest version: minimal decoration, hedged claims, no face example.
 const pptxgen = require("pptxgenjs");
 const p = new pptxgen();
 p.layout = "LAYOUT_WIDE";            // 13.3 x 7.5
 p.author = "Daoyuan Chi";
 p.title = "Real-Time Perspective Correction for Selfie Video";
 
-// ---- palette: "Ocean Gradient" (deep blue dominant, teal support, mint accent) ----
-const NAVY = "10243E";   // deep background
-const BLUE = "1C5D8C";   // primary
-const TEAL = "1C7293";   // secondary
-const MINT = "37C5A3";   // accent
-const ICE  = "CFE3F2";   // light text on dark
-const CREAM = "F4F7FA";  // light slide bg
-const INK  = "13222F";   // dark text on light
-const MUTE = "5B7184";   // muted captions
-
-const HF = "Georgia";    // headers
-const BF = "Calibri";    // body
+// minimal palette
+const INK   = "1A1A1A";   // body text
+const NAVY  = "1F3A5F";   // headings / title bg
+const ACCENT = "2E7D9A";  // one restrained accent
+const MUTE  = "6B7785";   // captions
+const WHITE = "FFFFFF";
+const HF = "Georgia";     // headers
+const BF = "Calibri";     // body
 const W = 13.3, H = 7.5;
 
-// helper: footer tag on light slides
 function footer(s, n) {
   s.addText("Real-Time Perspective Correction  ·  Daoyuan Chi", {
-    x: 0.6, y: H - 0.45, w: 8, h: 0.3, fontFace: BF, fontSize: 9,
-    color: MUTE, align: "left", margin: 0,
-  });
+    x: 0.7, y: H - 0.45, w: 9, h: 0.3, fontFace: BF, fontSize: 9,
+    color: MUTE, align: "left", margin: 0 });
   s.addText(String(n), {
-    x: W - 1.1, y: H - 0.45, w: 0.5, h: 0.3, fontFace: BF, fontSize: 9,
-    color: MUTE, align: "right", margin: 0,
-  });
+    x: W - 1.2, y: H - 0.45, w: 0.6, h: 0.3, fontFace: BF, fontSize: 9,
+    color: MUTE, align: "right", margin: 0 });
 }
-// helper: section eyebrow + title block on light slides
-function head(s, eyebrow, title) {
-  s.addText(eyebrow.toUpperCase(), {
-    x: 0.6, y: 0.45, w: 11, h: 0.3, fontFace: BF, fontSize: 12, bold: true,
-    color: TEAL, charSpacing: 3, margin: 0,
-  });
-  s.addText(title, {
-    x: 0.6, y: 0.78, w: 12.1, h: 0.85, fontFace: HF, fontSize: 30, bold: true,
-    color: INK, margin: 0,
-  });
+function title(s, t) {
+  s.addText(t, { x: 0.7, y: 0.5, w: 12, h: 0.7, fontFace: HF, fontSize: 28,
+    bold: true, color: NAVY, margin: 0 });
 }
 
 // =====================================================================
-// SLIDE 1 — Title (dark)
+// SLIDE 1 — Title
 // =====================================================================
 let s = p.addSlide();
 s.background = { color: NAVY };
-// accent block motif top-left
-s.addShape(p.shapes.RECTANGLE, { x: 0, y: 0, w: 0.28, h: H, fill: { color: MINT } });
-s.addText("REAL-TIME COMPUTER VISION", {
-  x: 0.9, y: 1.5, w: 11, h: 0.4, fontFace: BF, fontSize: 14, bold: true,
-  color: MINT, charSpacing: 4, margin: 0,
-});
-s.addText("Real-Time Perspective\nCorrection for Selfie Video", {
-  x: 0.9, y: 2.0, w: 11.5, h: 2.2, fontFace: HF, fontSize: 46, bold: true,
-  color: "FFFFFF", lineSpacingMultiple: 1.02, margin: 0,
-});
-s.addText([
-  { text: "Adaptive, depth-driven, temporally stable — running live at 30 FPS", options: { breakLine: true } },
-], { x: 0.92, y: 4.5, w: 11, h: 0.5, fontFace: BF, fontSize: 18, color: ICE, margin: 0 });
-s.addText([
-  { text: "Daoyuan Chi", options: { bold: true, color: "FFFFFF" } },
-  { text: "   ·   Stanford University", options: { color: ICE } },
-], { x: 0.92, y: 5.7, w: 11, h: 0.4, fontFace: BF, fontSize: 15, margin: 0 });
+s.addText("Real-Time Perspective Correction for Selfie Video", {
+  x: 1, y: 2.4, w: 11.3, h: 1.6, fontFace: HF, fontSize: 40, bold: true,
+  color: WHITE, lineSpacingMultiple: 1.05, margin: 0 });
+s.addText("A real-time, depth-based approach to reducing selfie distortion in video", {
+  x: 1, y: 4.1, w: 11, h: 0.5, fontFace: BF, fontSize: 17, color: "C7D4E2", margin: 0 });
+s.addText("Daoyuan Chi   ·   Stanford University", {
+  x: 1, y: 5.4, w: 11, h: 0.4, fontFace: BF, fontSize: 14, color: "C7D4E2", margin: 0 });
 
 // =====================================================================
-// SLIDE 2 — Problem (light, two column: text + the proof teaser)
+// SLIDE 2 — Problem & motivation
 // =====================================================================
-s = p.addSlide();
-s.background = { color: CREAM };
-head(s, "The problem", "Selfies distort your face — and prior fixes are offline");
-// left column text
+s = p.addSlide(); s.background = { color: WHITE };
+title(s, "The problem");
 s.addText([
-  { text: "Front cameras sit 30–50 cm away. Perspective makes near features (nose, lips, forehead) loom larger than far ones (ears, jaw).", options: { breakLine: true, paraSpaceAfter: 12 } },
-  { text: "Prior work corrects this per still image, offline:", options: { breakLine: true, paraSpaceAfter: 6, bold: true, color: INK } },
-  { text: "Fried 2016, Shih 2019 — fit a 3D model to one photo", options: { bullet: true, breakLine: true, color: MUTE } },
-  { text: "Zhao 2019, DisCO 2024 — deep nets, seconds per image", options: { bullet: true, breakLine: true, color: MUTE } },
-], { x: 0.6, y: 1.9, w: 5.7, h: 3.0, fontFace: BF, fontSize: 16, color: INK, valign: "top" });
-// the gap callout
-s.addShape(p.shapes.RECTANGLE, { x: 0.6, y: 5.25, w: 5.7, h: 1.5, fill: { color: NAVY } });
-s.addShape(p.shapes.RECTANGLE, { x: 0.6, y: 5.25, w: 0.12, h: 1.5, fill: { color: MINT } });
-s.addText("Our gap", {
-  x: 0.85, y: 5.42, w: 5, h: 0.3, fontFace: BF, fontSize: 12, bold: true,
-  color: MINT, charSpacing: 2, margin: 0,
-});
-s.addText("No real-time, temporally-stable corrector for live selfie video.", {
-  x: 0.85, y: 5.72, w: 5.2, h: 0.9, fontFace: BF, fontSize: 16, bold: true,
-  color: "FFFFFF", margin: 0, valign: "top",
-});
-// right: proof image teaser (raw vs corrected vs truth)
-s.addImage({ path: "proof_row.png", x: 6.7, y: 2.0, w: 6.0, h: 2.0 });
-s.addText("Close-up (left) → our correction (middle) → the same person at 16 ft, this subject’s own ground truth (right).", {
-  x: 6.7, y: 4.15, w: 6.0, h: 0.7, fontFace: BF, fontSize: 12, italic: true, color: MUTE, margin: 0,
-});
-// nose-ratio readout as a compact card so the mono line never wraps
-s.addShape(p.shapes.RECTANGLE, { x: 6.7, y: 4.95, w: 6.0, h: 1.05, fill: { color: "FFFFFF" },
-  line: { color: "DCE6EF", width: 1 } });
-s.addShape(p.shapes.RECTANGLE, { x: 6.7, y: 4.95, w: 0.12, h: 1.05, fill: { color: MINT } });
-s.addText("nose-width / face-width", {
-  x: 6.95, y: 5.1, w: 5.6, h: 0.3, fontFace: BF, fontSize: 12, bold: true, color: MUTE, margin: 0 });
+  { text: "Front-facing cameras are held close to the face, around 30–50 cm. At that distance, perspective magnifies the features nearest the lens — the nose and lips — relative to the ears and jaw. This is the familiar “selfie” look.", options: { breakLine: true, paraSpaceAfter: 14 } },
+  { text: "Prior work addresses this, but mostly for single still images and offline:", options: { breakLine: true, paraSpaceAfter: 6 } },
+  { text: "fitting a 3D head model to one photo (Fried 2016, Shih 2019)", options: { bullet: true, breakLine: true, color: MUTE } },
+  { text: "deep networks that take seconds per image (Zhao 2019, DisCO 2024)", options: { bullet: true, breakLine: true, color: MUTE } },
+], { x: 0.7, y: 1.6, w: 11.8, h: 2.6, fontFace: BF, fontSize: 17, color: INK, valign: "top" });
 s.addText([
-  { text: "0.296", options: { color: MUTE } },
-  { text: "  →  ", options: { color: INK } },
-  { text: "0.286", options: { bold: true, color: TEAL } },
-  { text: "      subject GT 0.287", options: { color: MUTE } },
-], { x: 6.95, y: 5.42, w: 5.6, h: 0.45, fontFace: "Consolas", fontSize: 16, bold: true, margin: 0 });
+  { text: "This project: ", options: { bold: true, color: NAVY } },
+  { text: "explore whether a similar correction can run in real time on live video, where the main added challenges are speed and frame-to-frame stability.", options: { color: INK } },
+], { x: 0.7, y: 4.6, w: 11.8, h: 1.0, fontFace: BF, fontSize: 17, valign: "top" });
 footer(s, 2);
 
 // =====================================================================
-// SLIDE 3 — Method (light, pipeline flow)
+// SLIDE 3 — Method
 // =====================================================================
-s = p.addSlide();
-s.background = { color: CREAM };
-head(s, "Method", "A measure-then-correct pipeline, per frame");
+s = p.addSlide(); s.background = { color: WHITE };
+title(s, "Method: a four-stage per-frame pipeline");
 const steps = [
-  ["1", "Detect", "MediaPipe Face Mesh\n478 (x, y, z) landmarks"],
-  ["2", "Measure", "Distortion ratios\n+ per-user calibration"],
-  ["3", "Correct", "Dense depth-driven\nperspective re-projection"],
-  ["4", "Stabilize", "Temporal smoothing\nacross frames"],
+  ["1.  Detect", "MediaPipe Face Mesh gives 478 facial landmarks per frame, each with a depth (z) value."],
+  ["2.  Measure", "Compute simple landmark ratios (mainly nose-width / face-width) as a distortion estimate."],
+  ["3.  Correct", "Interpolate the sparse landmark depths into a dense per-pixel depth map, then apply a pinhole re-projection per pixel (one cv2.remap). A smooth depth field gives a smooth warp."],
+  ["4.  Stabilize", "Smooth the landmarks over time (EMA / Kalman / 1-Euro) to reduce flicker."],
 ];
-const bx = 0.6, bw = 2.85, gap = 0.32, by = 2.1, bh = 2.5;
-steps.forEach((st, i) => {
-  const x = bx + i * (bw + gap);
-  s.addShape(p.shapes.RECTANGLE, { x, y: by, w: bw, h: bh, fill: { color: "FFFFFF" },
-    line: { color: "DCE6EF", width: 1 },
-    shadow: { type: "outer", color: "000000", blur: 7, offset: 2, angle: 135, opacity: 0.10 } });
-  s.addShape(p.shapes.RECTANGLE, { x, y: by, w: bw, h: 0.12, fill: { color: TEAL } });
-  s.addShape(p.shapes.OVAL, { x: x + 0.28, y: by + 0.38, w: 0.7, h: 0.7, fill: { color: NAVY } });
-  s.addText(st[0], { x: x + 0.28, y: by + 0.38, w: 0.7, h: 0.7, fontFace: HF, fontSize: 24, bold: true,
-    color: MINT, align: "center", valign: "middle", margin: 0 });
-  s.addText(st[1], { x: x + 0.2, y: by + 1.25, w: bw - 0.4, h: 0.4, fontFace: HF, fontSize: 19, bold: true,
-    color: INK, margin: 0 });
-  s.addText(st[2], { x: x + 0.2, y: by + 1.68, w: bw - 0.4, h: 0.75, fontFace: BF, fontSize: 13,
-    color: MUTE, margin: 0, valign: "top" });
-  if (i < 3) s.addText("›", { x: x + bw - 0.02, y: by + 0.7, w: gap, h: 1, fontFace: BF, fontSize: 30,
-    bold: true, color: TEAL, align: "center", valign: "middle", margin: 0 });
+let yy = 1.65;
+steps.forEach((st) => {
+  s.addText(st[0], { x: 0.7, y: yy, w: 2.4, h: 0.6, fontFace: HF, fontSize: 17, bold: true, color: ACCENT, margin: 0, valign: "top" });
+  s.addText(st[1], { x: 3.2, y: yy, w: 9.3, h: 1.1, fontFace: BF, fontSize: 15.5, color: INK, margin: 0, valign: "top" });
+  yy += st[1].length > 90 ? 1.25 : 0.95;
 });
-// key idea band
-s.addShape(p.shapes.RECTANGLE, { x: 0.6, y: 5.1, w: 12.1, h: 1.45, fill: { color: NAVY } });
-s.addShape(p.shapes.RECTANGLE, { x: 0.6, y: 5.1, w: 0.12, h: 1.45, fill: { color: MINT } });
-s.addText("Key idea", { x: 0.85, y: 5.28, w: 3, h: 0.3, fontFace: BF, fontSize: 12, bold: true,
-  color: MINT, charSpacing: 2, margin: 0 });
-s.addText([
-  { text: "We treat MediaPipe’s z as a depth signal, interpolate it to a dense per-pixel map, then apply the true ", options: {} },
-  { text: "pinhole re-projection per pixel", options: { bold: true, color: MINT } },
-  { text: " — a smooth depth field gives a smooth warp, with no sparse-landmark artifacts.", options: {} },
-], { x: 0.85, y: 5.62, w: 11.6, h: 0.85, fontFace: BF, fontSize: 15, color: "FFFFFF", margin: 0, valign: "top" });
+s.addText("Key idea: use MediaPipe’s depth as a signal to interpolate, rather than moving landmark points directly — which avoids the seams of sparse-landmark warps.", {
+  x: 0.7, y: 6.2, w: 11.8, h: 0.7, fontFace: BF, fontSize: 14, italic: true, color: MUTE, margin: 0, valign: "top" });
 footer(s, 3);
 
 // =====================================================================
-// SLIDE 4 — Result A: temporal stability (light, chart + numbers)
+// SLIDE 4 — Result 1: temporal stability
 // =====================================================================
-s = p.addSlide();
-s.background = { color: CREAM };
-head(s, "Result · temporal stability", "Smoothing cuts frame-to-frame jitter");
+s = p.addSlide(); s.background = { color: WHITE };
+title(s, "Result 1: temporal stability");
 s.addChart(p.charts.BAR, [{
-  name: "jitter", labels: ["None\n(baseline)", "EMA", "1-Euro", "Kalman"],
+  name: "jitter", labels: ["None", "EMA", "1-Euro", "Kalman"],
   values: [4.07, 3.28, 3.40, 3.69],
 }], {
-  x: 0.6, y: 1.95, w: 6.6, h: 4.6, barDir: "col",
-  chartColors: [MUTE, MINT, TEAL, BLUE],
-  chartArea: { fill: { color: "FFFFFF" } },
+  x: 0.7, y: 1.7, w: 6.6, h: 4.6, barDir: "col",
+  chartColors: [MUTE, ACCENT, ACCENT, ACCENT],
   catAxisLabelColor: INK, catAxisLabelFontSize: 12, catAxisLabelFontFace: BF,
-  valAxisLabelColor: MUTE, valAxisHidden: false, valAxisMinVal: 0, valAxisMaxVal: 5,
+  valAxisLabelColor: MUTE, valAxisMinVal: 0, valAxisMaxVal: 5,
   valGridLine: { color: "E2E8F0", size: 0.5 }, catGridLine: { style: "none" },
   showValue: true, dataLabelPosition: "outEnd", dataLabelColor: INK,
-  dataLabelFontFace: BF, dataLabelFontSize: 13, dataLabelFontBold: true,
-  dataLabelFormatCode: "0.00",
-  showLegend: false, showTitle: false,
-});
-s.addText("mean landmark jitter (px) — lower is steadier", {
-  x: 0.6, y: 6.45, w: 6.6, h: 0.3, fontFace: BF, fontSize: 11, italic: true, color: MUTE, align: "center", margin: 0 });
-// right: stat callouts
-const stats = [
-  ["−19%", "EMA jitter vs baseline", MINT],
-  ["−17%", "1-Euro — best lag/jitter balance", TEAL],
-  ["10 s / 300 frames", "talking + head-turn clip", BLUE],
-];
-stats.forEach((st, i) => {
-  const y = 2.0 + i * 1.45;
-  s.addShape(p.shapes.RECTANGLE, { x: 7.6, y, w: 5.1, h: 1.25, fill: { color: "FFFFFF" },
-    line: { color: "DCE6EF", width: 1 },
-    shadow: { type: "outer", color: "000000", blur: 6, offset: 2, angle: 135, opacity: 0.08 } });
-  s.addShape(p.shapes.RECTANGLE, { x: 7.6, y, w: 0.12, h: 1.25, fill: { color: st[2] } });
-  s.addText(st[0], { x: 7.85, y: y + 0.12, w: 4.7, h: 0.7, fontFace: HF, fontSize: 30, bold: true, color: INK, margin: 0 });
-  s.addText(st[1], { x: 7.87, y: y + 0.82, w: 4.7, h: 0.35, fontFace: BF, fontSize: 13, color: MUTE, margin: 0 });
-});
-s.addText("EMA, Kalman, and the 1-Euro filter (Casiez 2012) all reduce jitter; 1-Euro trades a little for better motion response, as expected.", {
-  x: 7.6, y: 6.3, w: 5.1, h: 0.7, fontFace: BF, fontSize: 11.5, italic: true, color: MUTE, margin: 0, valign: "top" });
+  dataLabelFontFace: BF, dataLabelFontSize: 12, dataLabelFontBold: true,
+  dataLabelFormatCode: "0.00", showLegend: false, showTitle: false });
+s.addText("mean frame-to-frame landmark jitter (px) — lower is steadier", {
+  x: 0.7, y: 6.35, w: 6.6, h: 0.3, fontFace: BF, fontSize: 11, italic: true, color: MUTE, align: "center", margin: 0 });
+s.addText([
+  { text: "Running the corrector per frame inherits the detector’s jitter, which causes flicker.", options: { breakLine: true, paraSpaceAfter: 12 } },
+  { text: "On a 10 s / 300-frame clip, all three smoothers reduce jitter relative to the per-frame baseline:", options: { breakLine: true, paraSpaceAfter: 8 } },
+  { text: "EMA ≈ 19% lower", options: { bullet: true, breakLine: true } },
+  { text: "1-Euro ≈ 16% lower, with better response during motion", options: { bullet: true, breakLine: true } },
+  { text: "Kalman ≈ 9% lower", options: { bullet: true } },
+], { x: 7.7, y: 1.9, w: 5.0, h: 4.3, fontFace: BF, fontSize: 15, color: INK, valign: "top" });
 footer(s, 4);
 
 // =====================================================================
-// SLIDE 5 — Result B: CMDP ground-truth eval (light, image + numbers)
+// SLIDE 5 — Result 2: CMDP accuracy
 // =====================================================================
-s = p.addSlide();
-s.background = { color: CREAM };
-head(s, "Result · accuracy on ground truth", "51 subjects × 7 distances (Caltech CMDP)");
-s.addImage({ path: "cmdp_clean.png", x: 0.6, y: 1.9, w: 7.7, h: 3.9,
-  sizing: { type: "contain", w: 7.7, h: 3.9 } });
-s.addText("Caltech Multi-Distance Portraits — each subject shot at 2–16 ft; the 16 ft frame is the distortion-free ground truth. Our correction (teal) pulls the distorted curve toward it at every distance.", {
-  x: 0.6, y: 5.85, w: 7.7, h: 0.7, fontFace: BF, fontSize: 12.5, italic: true, color: MUTE, margin: 0, valign: "top" });
-// right callouts
-const c2 = [
-  ["93%", "of the distortion gap closed at 6 ft", MINT],
-  ["347", "real images measured against GT", TEAL],
-  ["Overshoot at 12 ft", "→ motivates per-user calibration", BLUE],
-];
-c2.forEach((st, i) => {
-  const y = 2.0 + i * 1.5;
-  s.addShape(p.shapes.RECTANGLE, { x: 8.7, y, w: 4.0, h: 1.3, fill: { color: "FFFFFF" },
-    line: { color: "DCE6EF", width: 1 },
-    shadow: { type: "outer", color: "000000", blur: 6, offset: 2, angle: 135, opacity: 0.08 } });
-  s.addShape(p.shapes.RECTANGLE, { x: 8.7, y, w: 0.12, h: 1.3, fill: { color: st[2] } });
-  s.addText(st[0], { x: 8.95, y: y + 0.14, w: 3.6, h: 0.62, fontFace: HF, fontSize: 25, bold: true, color: INK, margin: 0 });
-  s.addText(st[1], { x: 8.97, y: y + 0.78, w: 3.6, h: 0.45, fontFace: BF, fontSize: 12.5, color: MUTE, margin: 0, valign: "top" });
-});
+s = p.addSlide(); s.background = { color: WHITE };
+title(s, "Result 2: accuracy on a ground-truth benchmark");
+s.addImage({ path: "cmdp_clean.png", x: 0.7, y: 1.7, w: 7.6, h: 3.9,
+  sizing: { type: "contain", w: 7.6, h: 3.9 } });
+s.addText("Caltech Multi-Distance Portraits: 51 subjects, each shot at 2–16 ft. The 16 ft image is the near-undistorted reference.", {
+  x: 0.7, y: 5.7, w: 7.6, h: 0.7, fontFace: BF, fontSize: 12, italic: true, color: MUTE, margin: 0, valign: "top" });
+s.addText([
+  { text: "The raw nose ratio rises steadily as the camera gets closer, so the metric does capture perspective distortion.", options: { breakLine: true, paraSpaceAfter: 12 } },
+  { text: "Across 347 images, the correction moves the ratio toward the ground-truth line at every distance, closing roughly 38–93% of the gap at typical selfie distances.", options: { breakLine: true, paraSpaceAfter: 12 } },
+  { text: "At a fixed strength it can over-correct at far distances — which motivates the per-user calibration below.", options: { color: MUTE } },
+], { x: 8.6, y: 1.9, w: 4.1, h: 4.3, fontFace: BF, fontSize: 14.5, color: INK, valign: "top" });
 footer(s, 5);
 
 // =====================================================================
-// SLIDE 6 — Calibration insight + ML extension (light, two cards)
+// SLIDE 6 — Observations / what I learned
 // =====================================================================
-s = p.addSlide();
-s.background = { color: CREAM };
-head(s, "What we learned", "Two findings that strengthen the method");
-// card 1: person-dependence -> calibration
-s.addShape(p.shapes.RECTANGLE, { x: 0.6, y: 1.95, w: 5.9, h: 4.4, fill: { color: "FFFFFF" },
-  line: { color: "DCE6EF", width: 1 },
-  shadow: { type: "outer", color: "000000", blur: 7, offset: 2, angle: 135, opacity: 0.10 } });
-s.addShape(p.shapes.RECTANGLE, { x: 0.6, y: 1.95, w: 5.9, h: 0.12, fill: { color: MINT } });
-s.addText("Per-user calibration", { x: 0.9, y: 2.25, w: 5.3, h: 0.45, fontFace: HF, fontSize: 21, bold: true, color: INK, margin: 0 });
-s.addText([
-  { text: "Face proportions vary by person, so a single population baseline mislabels a naturally-wider face as “distorted.”", options: { breakLine: true, paraSpaceAfter: 12 } },
-  { text: "Fix: capture each user’s own neutral once (press ", options: {} },
-  { text: "k", options: { bold: true, color: TEAL } },
-  { text: "). Correction then engages only when you are genuinely close to the camera, and is a clean no-op otherwise.", options: { breakLine: true, paraSpaceAfter: 12 } },
-  { text: "This is the difference between a fixed filter and a measure-then-correct system.", options: { italic: true, color: MUTE } },
-], { x: 0.9, y: 2.85, w: 5.3, h: 2.7, fontFace: BF, fontSize: 15, color: INK, valign: "top" });
-s.addShape(p.shapes.RECTANGLE, { x: 0.9, y: 5.7, w: 5.3, h: 0.5, fill: { color: "EAF6F1" } });
-s.addText("undistorted face  →  α = 1.00  (untouched)", {
-  x: 1.0, y: 5.78, w: 5.1, h: 0.35, fontFace: "Consolas", fontSize: 13, bold: true, color: TEAL, margin: 0, valign: "middle" });
-// card 2: ML depth
-s.addShape(p.shapes.RECTANGLE, { x: 6.8, y: 1.95, w: 5.9, h: 4.4, fill: { color: "FFFFFF" },
-  line: { color: "DCE6EF", width: 1 },
-  shadow: { type: "outer", color: "000000", blur: 7, offset: 2, angle: 135, opacity: 0.10 } });
-s.addShape(p.shapes.RECTANGLE, { x: 6.8, y: 1.95, w: 5.9, h: 0.12, fill: { color: TEAL } });
-s.addText("Learned depth swaps in cleanly", { x: 7.1, y: 2.25, w: 5.3, h: 0.45, fontFace: HF, fontSize: 21, bold: true, color: INK, margin: 0 });
-s.addText([
-  { text: "Same warp, better depth: we drop in ", options: {} },
-  { text: "Depth Anything V2", options: { bold: true, color: TEAL } },
-  { text: " (NeurIPS 2024) in place of MediaPipe’s z, via one depth-override hook.", options: { breakLine: true, paraSpaceAfter: 12 } },
-  { text: "On the 51-subject CMDP benchmark it closes much more of the gap at close range, confirming the pipeline is depth-limited, not warp-limited.", options: { breakLine: true, paraSpaceAfter: 12 } },
-  { text: "Future work: run ML depth inside the live loop.", options: { italic: true, color: MUTE } },
-], { x: 7.1, y: 2.85, w: 5.3, h: 2.7, fontFace: BF, fontSize: 15, color: INK, valign: "top" });
-s.addShape(p.shapes.RECTANGLE, { x: 7.1, y: 5.7, w: 5.3, h: 0.5, fill: { color: "E6F0F5" } });
-s.addText([
-  { text: "gap closed at 4 ft:   ", options: { color: MUTE } },
-  { text: "MediaPipe 33%", options: { bold: true, color: MUTE } },
-  { text: "  →  ", options: { color: INK } },
-  { text: "ML 78%", options: { bold: true, color: TEAL } },
-], { x: 7.2, y: 5.78, w: 5.1, h: 0.35, fontFace: "Consolas", fontSize: 13, margin: 0, valign: "middle" });
+s = p.addSlide(); s.background = { color: WHITE };
+title(s, "Two observations");
+s.addText("Per-user calibration", { x: 0.7, y: 1.7, w: 11, h: 0.45, fontFace: HF, fontSize: 18, bold: true, color: NAVY, margin: 0 });
+s.addText("Face proportions vary between people, so a single population baseline can mislabel a naturally wider face as distorted. Capturing each user’s own neutral once lets the system correct only when the face is genuinely close, and do little otherwise.", {
+  x: 0.7, y: 2.2, w: 11.8, h: 1.1, fontFace: BF, fontSize: 15.5, color: INK, margin: 0, valign: "top" });
+s.addText("Depth quality appears to be the main limit", { x: 0.7, y: 3.7, w: 11, h: 0.45, fontFace: HF, fontSize: 18, bold: true, color: NAVY, margin: 0 });
+s.addText("Substituting a learned depth model (Depth Anything V2) for MediaPipe’s depth, with the same warp, closed noticeably more of the gap at close range. This suggests the limiting factor is the depth signal rather than the warp itself.", {
+  x: 0.7, y: 4.2, w: 11.8, h: 1.1, fontFace: BF, fontSize: 15.5, color: INK, margin: 0, valign: "top" });
+s.addText("Limitations: the distortion metric is person-dependent, the effect is subtle at normal distance, and a single-ratio 2D warp cannot fully reproduce the 3D shape.", {
+  x: 0.7, y: 5.7, w: 11.8, h: 0.8, fontFace: BF, fontSize: 14, italic: true, color: MUTE, margin: 0, valign: "top" });
 footer(s, 6);
 
 // =====================================================================
-// SLIDE 7 — Contributions + future work (dark close)
+// SLIDE 7 — Summary
 // =====================================================================
-s = p.addSlide();
-s.background = { color: NAVY };
-s.addShape(p.shapes.RECTANGLE, { x: 0, y: 0, w: 0.28, h: H, fill: { color: MINT } });
-s.addText("CONTRIBUTIONS", {
-  x: 0.9, y: 0.7, w: 11, h: 0.4, fontFace: BF, fontSize: 13, bold: true, color: MINT, charSpacing: 4, margin: 0 });
-s.addText("What’s new here", {
-  x: 0.9, y: 1.1, w: 11.5, h: 0.8, fontFace: HF, fontSize: 34, bold: true, color: "FFFFFF", margin: 0 });
-const contribs = [
-  ["First real-time, temporally-stable selfie corrector", "30 FPS live; prior work is offline per-image"],
-  ["Dense depth-driven re-projection", "MediaPipe z → per-pixel pinhole warp, artifact-free"],
-  ["Validated on ground truth", "51-subject CMDP benchmark, not just demos"],
-  ["Adaptive, per-user calibration", "corrects only real distortion; no-op otherwise"],
-];
-contribs.forEach((c, i) => {
-  const y = 2.3 + i * 1.0;
-  s.addShape(p.shapes.OVAL, { x: 0.95, y: y + 0.06, w: 0.34, h: 0.34, fill: { color: MINT } });
-  s.addText("✓", { x: 0.95, y: y + 0.06, w: 0.34, h: 0.34, fontFace: BF, fontSize: 15, bold: true, color: NAVY, align: "center", valign: "middle", margin: 0 });
-  s.addText([
-    { text: c[0], options: { bold: true, color: "FFFFFF", breakLine: true } },
-    { text: c[1], options: { color: ICE } },
-  ], { x: 1.5, y: y - 0.06, w: 8.2, h: 0.78, fontFace: BF, fontSize: 15.5, margin: 0, valign: "middle", lineSpacingMultiple: 1.0 });
-});
-// future work strip
-s.addShape(p.shapes.RECTANGLE, { x: 10.15, y: 2.25, w: 2.55, h: 3.95, fill: { color: TEAL } });
-s.addText("NEXT", { x: 10.4, y: 2.5, w: 2.2, h: 0.3, fontFace: BF, fontSize: 13, bold: true, color: NAVY, charSpacing: 3, margin: 0 });
+s = p.addSlide(); s.background = { color: NAVY };
+s.addText("Summary", { x: 1, y: 0.9, w: 11, h: 0.7, fontFace: HF, fontSize: 28, bold: true, color: WHITE, margin: 0 });
 s.addText([
-  { text: "ML depth in the live loop", options: { bullet: true, breakLine: true, paraSpaceAfter: 14 } },
-  { text: "Broader subject study", options: { bullet: true, breakLine: true, paraSpaceAfter: 14 } },
-  { text: "Auto-calibrate on the first frames", options: { bullet: true } },
-], { x: 10.4, y: 3.05, w: 2.1, h: 2.9, fontFace: BF, fontSize: 14, color: "FFFFFF", valign: "top" });
-s.addText("github.com/Danni281/selfie-perspective-correction", {
-  x: 0.9, y: 6.5, w: 11, h: 0.4, fontFace: "Consolas", fontSize: 14, color: MINT, margin: 0 });
+  { text: "A real-time, depth-based perspective corrector for selfie video, running at roughly 23–30 FPS on a laptop.", options: { bullet: true, breakLine: true, paraSpaceAfter: 14 } },
+  { text: "A dense depth-driven warp that reuses MediaPipe’s landmark depths and avoids sparse-warp artifacts.", options: { bullet: true, breakLine: true, paraSpaceAfter: 14 } },
+  { text: "Evaluated on a 51-subject ground-truth benchmark, with three temporal smoothers compared.", options: { bullet: true, breakLine: true, paraSpaceAfter: 14 } },
+  { text: "Per-user calibration so the correction is adaptive rather than fixed.", options: { bullet: true } },
+], { x: 1, y: 2.0, w: 11.3, h: 3.4, fontFace: BF, fontSize: 17, color: "E6EDF4", valign: "top" });
+s.addText("Future work: a faster learned-depth model in the live loop, automatic calibration, and a richer distortion metric.", {
+  x: 1, y: 5.5, w: 11.3, h: 0.6, fontFace: BF, fontSize: 14, italic: true, color: "AFC0D4", margin: 0, valign: "top" });
+s.addText("github.com/Danni281/selfie-perspective-correction   ·   Thank you", {
+  x: 1, y: 6.4, w: 11.3, h: 0.4, fontFace: BF, fontSize: 13, color: "AFC0D4", margin: 0 });
 
 p.writeFile({ fileName: "../report/demo_slides.pptx" }).then(f => console.log("wrote", f));
