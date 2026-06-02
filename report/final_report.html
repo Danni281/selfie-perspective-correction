@@ -4,20 +4,20 @@
 <meta charset="utf-8">
 <title>Real-Time Perspective Correction for Selfie Video</title>
 <style>
-  @page { size: letter; margin: 0.75in 0.7in 0.85in 0.7in; }
-  html { font-family: "Times New Roman", Times, serif; font-size: 9.6pt; line-height: 1.32; color: #000; }
+  @page { size: letter; margin: 0.6in 0.65in 0.6in 0.65in; }
+  html { font-family: "Times New Roman", Times, serif; font-size: 9.5pt; line-height: 1.26; color: #000; }
   body { margin: 0; }
   .title { text-align: center; font-size: 18pt; font-weight: 700; line-height: 1.15; margin: 0 0 6pt 0; }
   .authors { text-align: center; font-size: 11pt; margin-bottom: 2pt; }
   .affil { text-align: center; font-size: 9.5pt; color: #222; margin-bottom: 12pt; }
   .cols { column-count: 2; column-gap: 0.3in; }
-  h2 { font-size: 11pt; font-weight: 700; margin: 10pt 0 3pt 0; break-after: avoid; }
-  h3 { font-size: 9.8pt; font-weight: 700; font-style: italic; margin: 7pt 0 2pt 0; break-after: avoid; }
-  p { margin: 0 0 5pt 0; text-align: justify; }
+  h2 { font-size: 11pt; font-weight: 700; margin: 7pt 0 2pt 0; break-after: avoid; }
+  h3 { font-size: 9.8pt; font-weight: 700; font-style: italic; margin: 5pt 0 2pt 0; break-after: avoid; }
+  p { margin: 0 0 4pt 0; text-align: justify; }
   .abstract { font-weight: 400; }
   .abstract b { font-weight: 700; }
   .abshead { text-align: center; font-weight: 700; font-size: 10pt; margin: 4pt 0 3pt 0; }
-  figure { margin: 6pt 0; break-inside: avoid; }
+  figure { margin: 4pt 0; break-inside: avoid; }
   figure img { width: 100%; height: auto; border: 0.4pt solid #bbb; }
   figcaption { font-size: 8.4pt; color: #111; margin-top: 3pt; text-align: justify; }
   figcaption b { font-weight: 700; }
@@ -40,10 +40,10 @@
 
 <div class="abshead">Abstract</div>
 <div class="cols">
-<p class="abstract">Front-facing cameras are held within arm's reach, so perspective projection magnifies facial features near the lens and produces the familiar "selfie distortion." Existing corrections operate offline on single still images, either by fitting a 3D morphable model or by running a heavy neural network that takes seconds per frame. We present a pipeline that corrects perspective distortion in <b>live selfie video</b> at interactive frame rates. The core idea is to treat the 478 depth-bearing landmarks produced by MediaPipe Face Mesh not as a sparse set of points to be moved, but as a sparse <b>depth signal</b>: we interpolate this signal across a Delaunay triangulation into a dense per-pixel depth map, then apply the exact pinhole re-projection a longer focal length would produce, evaluated per pixel and realized with a single <code>cv2.remap</code>. Because the depth field is smooth, the resulting warp is smooth, avoiding the triangle-spanning artifacts that plague sparse-landmark warps. We add a per-user calibration step so the system measures distortion relative to each individual's own face rather than a population average, and we compare three temporal smoothers (EMA, a per-landmark Kalman filter, and the 1&nbsp;Euro filter) to suppress frame-to-frame jitter. On the Caltech Multi-Distance Portraits benchmark (51 subjects &times; 7 distances) our correction monotonically reduces the principal distortion metric toward the distortion-free ground truth, closing 38&ndash;93% of the gap across typical selfie distances; substituting a learned depth model (Depth Anything V2) for MediaPipe depth closes substantially more, confirming that the pipeline is limited by depth quality rather than by the warp. The system runs at 23&ndash;30&nbsp;FPS on a laptop CPU.</p>
+<p class="abstract">Front-facing cameras are held within arm's reach, so perspective projection magnifies facial features near the lens and produces the familiar "selfie distortion." Existing corrections operate offline on single still images, either by fitting a 3D morphable model or by running a heavy neural network that takes seconds per frame. We present a pipeline that corrects perspective distortion in <b>live selfie video</b> at interactive frame rates. The core idea is to treat the 478 depth-bearing landmarks produced by MediaPipe Face Mesh not as a sparse set of points to be moved, but as a sparse <b>depth signal</b>: we interpolate this signal across a Delaunay triangulation into a dense per-pixel depth map, then apply the pinhole re-projection a longer focal length would produce, evaluated per pixel and realized with a single <code>cv2.remap</code>. Because the depth field is smooth, the resulting warp is smooth, avoiding the triangle-spanning artifacts that plague sparse-landmark warps. We add a per-user calibration step so the system measures distortion relative to each individual's own face rather than a population average, and we compare three temporal smoothers (EMA, a per-landmark Kalman filter, and the 1&nbsp;Euro filter) to suppress frame-to-frame jitter. On the Caltech Multi-Distance Portraits benchmark (51 subjects &times; 7 distances) our correction monotonically reduces the principal distortion metric toward the distortion-free ground truth, closing 32&ndash;66% of the gap across typical selfie distances (2&ndash;6&nbsp;ft); substituting a learned depth model (Depth Anything V2) for MediaPipe depth closes substantially more, confirming that the pipeline is limited by depth quality rather than by the warp. The system runs at 23&ndash;30&nbsp;FPS on a laptop CPU.</p>
 
 <h2>1. Introduction</h2>
-<p>Photographs of a face taken at close range look subtly wrong. A portrait shot from two feet away exaggerates the nose, lips, and forehead relative to the ears and jaw, while the same person photographed from across a room appears natural. This is not an optical defect of the lens but a consequence of perspective projection: features closer to the camera subtend a larger visual angle, and at selfie distances (30&ndash;50&nbsp;cm) the depth variation across a face is a large fraction of the camera-to-subject distance, so the effect is pronounced. Because nearly all casual photography and video conferencing now happens on front-facing phone and laptop cameras held at arm's length, this distortion affects billions of images daily and measurably biases human perception of attractiveness, trustworthiness, and even apparent body weight.</p>
+<p>Photographs of a face taken at close range look subtly wrong. A portrait shot from two feet away exaggerates the nose, lips, and forehead relative to the ears and jaw, while the same person photographed from across a room appears natural. This is not an optical defect of the lens but a consequence of perspective projection: features closer to the camera subtend a larger visual angle, and at selfie distances (30&ndash;50&nbsp;cm) the depth variation across a face is a large fraction of the camera-to-subject distance, so the effect is pronounced. Because nearly all casual photography and video conferencing now happens on front-facing phone and laptop cameras held at arm's length, this distortion affects billions of images daily and measurably biases human perception of traits such as attractiveness and trustworthiness&nbsp;[14].</p>
 <p>The problem is well studied for single still images. Fried et al.&nbsp;[1] fit a parametric 3D head model and a perspective camera to one photograph and synthesize the image that a different camera distance would have produced. Shih et al.&nbsp;[2] optimize a content-aware warp mesh for wide-angle group photos on phones. More recent deep methods [3,&nbsp;6,&nbsp;7] learn the correction end to end and achieve high quality, including hallucinating occluded ears, but at the cost of large models and inference times measured in seconds.</p>
 <p>None of these methods target <b>live video</b>. Doing so introduces two challenges absent from the single-image setting. First is <b>speed</b>: the entire detect&ndash;measure&ndash;correct loop must complete within a frame budget of roughly 33&nbsp;ms. Second is <b>temporal stability</b>: running any per-frame method independently on a video produces flicker, because the underlying facial landmark detector jitters by several pixels frame to frame even when the subject is still. This work addresses both. Our contributions are:</p>
 <p>(1) A real-time, temporally stable selfie perspective corrector running at interactive frame rates on commodity hardware, where prior work is offline and per-image.</p>
@@ -106,7 +106,7 @@
 </figure>
 
 <h3>5.2. Accuracy on the CMDP benchmark</h3>
-<p>The Caltech Multi-Distance Portraits dataset&nbsp;[4] photographs each of 51 subjects at seven distances from 2 to 16&nbsp;ft. The 16&nbsp;ft image is effectively distortion free and serves as per-subject ground truth. We ran MediaPipe on all 347 detected images, measured the nose ratio, applied our correction, and re-measured. The raw ratio inflates monotonically from 0.277 at 16&nbsp;ft to 0.301 at 2&nbsp;ft, confirming that the metric captures perspective distortion across subjects. Our correction pulls the ratio toward the ground-truth line at every distance (Figure&nbsp;3), closing 38% of the raw-to-ground-truth gap at the most extreme 2&nbsp;ft distance, 33% at 4&nbsp;ft, and 66% at 6&nbsp;ft. Beyond 8&nbsp;ft the fixed <code>&alpha; = 2.0</code> over-corrects (the remaining gap is tiny and the warp overshoots it), which is precisely the behavior the adaptive per-user calibration of Section&nbsp;3.3 is designed to prevent in the live system.</p>
+<p>The Caltech Multi-Distance Portraits dataset&nbsp;[4] photographs each of 51 subjects at seven distances from 2 to 16&nbsp;ft. The 16&nbsp;ft image is effectively distortion free and serves as per-subject ground truth. We ran MediaPipe on all 347 detected images, measured the nose ratio, applied our correction, and re-measured. The raw ratio inflates monotonically from 0.277 at 16&nbsp;ft to 0.301 at 2&nbsp;ft, confirming that the metric captures perspective distortion across subjects. Our correction pulls the ratio toward the ground-truth line at every distance (Figure&nbsp;3). Across typical selfie distances it closes 38% of the raw-to-ground-truth gap at 2&nbsp;ft, 32% at 3&nbsp;ft, 33% at 4&nbsp;ft, and 66% at 6&nbsp;ft &mdash; a 32&ndash;66% range. At 8&nbsp;ft the residual gap is already small and the fixed <code>&alpha; = 2.0</code> begins to over-correct (closing 93% there, then overshooting past 12&nbsp;ft), which is precisely the behavior the adaptive per-user calibration of Section&nbsp;3.3 is designed to prevent in the live system.</p>
 
 <figure>
 <img src="../results/cmdp_eval_ml.png" alt="CMDP MediaPipe vs ML depth">
@@ -122,10 +122,10 @@
 <table>
 <tr><th class="l">Variant</th><th>Warp (ms)</th><th>Total (ms)</th><th>FPS</th><th>Jitter (px)</th></tr>
 <tr><td class="l">Raw (no correction)</td><td>0.0</td><td>2.7</td><td>365</td><td>4.07</td></tr>
-<tr><td class="l">Per-frame (no smoothing)</td><td>36.1</td><td>42.5</td><td>23.5</td><td>4.05</td></tr>
-<tr><td class="l">+ EMA</td><td>36.1</td><td>42.5</td><td>23.5</td><td>3.29</td></tr>
-<tr><td class="l">+ 1&nbsp;Euro</td><td>37.5</td><td>43.8</td><td>22.8</td><td>3.41</td></tr>
-<tr><td class="l">+ Kalman</td><td>37.6</td><td>44.1</td><td>22.7</td><td>3.70</td></tr>
+<tr><td class="l">Per-frame (no smoothing)</td><td>36.1</td><td>42.5</td><td>23.5</td><td>4.07</td></tr>
+<tr><td class="l">+ EMA</td><td>36.1</td><td>42.5</td><td>23.5</td><td>3.28</td></tr>
+<tr><td class="l">+ 1&nbsp;Euro</td><td>37.5</td><td>43.8</td><td>22.8</td><td>3.40</td></tr>
+<tr><td class="l">+ Kalman</td><td>37.6</td><td>44.1</td><td>22.7</td><td>3.69</td></tr>
 </table>
 <p style="font-size:8.4pt; margin-top:-3pt;"><b>Table 1.</b> Per-stage latency and jitter on the 300-frame clip (720p, laptop CPU).</p>
 
@@ -134,7 +134,7 @@
 <p>A subtler point concerns the warp center. Our re-projection scales about the face centroid; this is correct for a centered face but only approximates the true optical-center geometry when the face is off-axis. A full treatment would estimate the camera's principal point. Finally, our depth comes either from MediaPipe's relatively noisy <code>z</code> or, in the ablation, from a model too heavy for the live loop; Section&nbsp;5.3 shows this is the dominant error source.</p>
 
 <h2>7. Conclusion</h2>
-<p>We presented, to our knowledge, the first real-time, temporally stable perspective corrector for selfie video. By reinterpreting MediaPipe's landmark depths as a signal to be densified rather than vertices to be moved, we obtain an artifact-free warp from classical components at interactive frame rates. Per-user calibration makes the correction adaptive, engaging only on genuine distortion, and a 51-subject ground-truth evaluation shows it reduces the principal distortion metric toward the truth, closing 38&ndash;93% of the gap across selfie distances. An ablation isolates depth quality as the limiting factor and points to learned depth in the live loop as the most promising next step, alongside automatic calibration and principal-point estimation.</p>
+<p>We presented, to our knowledge, the first real-time, temporally stable perspective corrector for selfie video. By reinterpreting MediaPipe's landmark depths as a signal to be densified rather than vertices to be moved, we obtain an artifact-free warp from classical components at interactive frame rates. Per-user calibration makes the correction adaptive, engaging only on genuine distortion, and a 51-subject ground-truth evaluation shows it reduces the principal distortion metric toward the truth, closing 32&ndash;66% of the gap across selfie distances (2&ndash;6&nbsp;ft). An ablation isolates depth quality as the limiting factor and points to learned depth in the live loop as the most promising next step, alongside automatic calibration and principal-point estimation.</p>
 
 <h2 class="full" style="margin-top:8pt;">References</h2>
 <div class="refs">
@@ -151,6 +151,7 @@
 <p>[11] F. L. Bookstein. Principal Warps: Thin-Plate Splines and the Decomposition of Deformations. <i>IEEE TPAMI</i>, 1989.</p>
 <p>[12] G. Casiez, N. Roussel, D. Vogel. 1&nbsp;Euro Filter: A Simple Speed-Based Low-Pass Filter for Noisy Input in Interactive Systems. <i>CHI</i>, 2012.</p>
 <p>[13] L. Yang, B. Kang, Z. Huang, et al. Depth Anything V2. <i>NeurIPS</i>, 2024.</p>
+<p>[14] R. Bryan, P. Perona, R. Adolphs. Perspective Distortion from Interpersonal Distance Is an Implicit Visual Cue for Social Judgments of Faces. <i>PLoS ONE</i>, 7(9), 2012.</p>
 </div>
 
 </div>
